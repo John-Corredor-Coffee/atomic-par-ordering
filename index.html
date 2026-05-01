@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAR Ordering — Atomic Coffee Roasters</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: #f4f4f2;
+      color: rgba(0,0,0,0.75);
+      min-height: 100vh;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+    }
+
+    /* ── ANNOUNCEMENT BAR ── */
+    .announcement {
+      background: #0a0a0a;
+      color: white;
+      text-align: center;
+      padding: 10px 24px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    /* ── NAV ── */
+    nav {
+      background: #ffffff;
+      border-bottom: 1px solid #e8e8e8;
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-brand {
+      font-family: 'Cooper Black', serif;
+      font-size: 15px;
+      font-weight: 400;
+      color: #0a0a0a;
+      letter-spacing: 0.02em;
+    }
+    .nav-right { display: flex; align-items: center; gap: 12px; }
+    .demo-label { font-size: 12px; color: rgba(0,0,0,0.4); letter-spacing: 0.03em; }
+
+    select {
+      background: #ffffff;
+      color: #0a0a0a;
+      border: 1px solid #d0d0d0;
+      border-radius: 0;
+      padding: 7px 12px;
+      font-size: 13px;
+      font-family: 'Outfit', sans-serif;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+    }
+    select:focus { outline: none; border-color: #0a0a0a; }
+
+    .view-toggle {
+      display: flex;
+      border: 1px solid #0a0a0a;
+      overflow: hidden;
+    }
+    .view-btn {
+      padding: 7px 18px;
+      font-size: 12px;
+      font-weight: 700;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(0,0,0,0.5);
+      cursor: pointer;
+      border: none;
+      background: none;
+      transition: all 0.15s;
+    }
+    .view-btn + .view-btn { border-left: 1px solid #0a0a0a; }
+    .view-btn.active { background: #0a0a0a; color: #ffffff; }
+
+    /* ── LAYOUT ── */
+    main { max-width: 1160px; margin: 0 auto; padding: 32px 24px; }
+
+    /* ── ORDER WINDOW ── */
+    .order-window {
+      background: white;
+      padding: 24px 32px;
+      margin-bottom: 24px;
+      border: 1px solid #e0e0e0;
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-wrap: wrap;
+    }
+    .order-window.warn { border-color: #f59e0b; background: #fffbef; }
+    .order-window.urgent { border-color: #ef4444; background: #fff5f5; }
+
+    .ow-block { padding: 0 32px; display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 150px; }
+    .ow-block:first-child { padding-left: 0; }
+    .ow-divider { width: 1px; height: 48px; background: #e8e8e8; }
+    .ow-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(0,0,0,0.4); font-weight: 700; }
+    .ow-value { font-family: 'Cooper Black', serif; font-size: 20px; font-weight: 400; color: #0a0a0a; }
+    .ow-sub { font-size: 12px; color: rgba(0,0,0,0.4); }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .badge-ok { background: #dcfce7; color: #166534; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-urgent { background: #fee2e2; color: #991b1b; }
+    .badge-passed { background: #f0f0f0; color: rgba(0,0,0,0.5); }
+
+    /* ── CARD ── */
+    .card {
+      background: white;
+      border: 1px solid #e0e0e0;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .card-header {
+      padding: 16px 28px;
+      border-bottom: 1px solid #e8e8e8;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #fafafa;
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #0a0a0a;
+    }
+    .card-hint { font-size: 12px; color: rgba(0,0,0,0.4); }
+
+    /* ── TABLE ── */
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      padding: 12px 24px;
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: rgba(0,0,0,0.4);
+      background: #fafafa;
+      border-bottom: 1px solid #e8e8e8;
+      font-weight: 700;
+    }
+    td {
+      padding: 16px 24px;
+      border-bottom: 1px solid #f0f0f0;
+      vertical-align: middle;
+      font-size: 14px;
+    }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: #fafafa; }
+
+    .item-name { font-weight: 700; font-size: 14px; color: #0a0a0a; }
+    .item-sku { font-size: 11px; color: rgba(0,0,0,0.35); margin-top: 3px; font-family: 'SF Mono', 'Fira Code', monospace; letter-spacing: 0.04em; }
+
+    .onhand-wrap { display: flex; align-items: center; gap: 8px; }
+    .onhand-input {
+      width: 76px;
+      padding: 7px 10px;
+      border: 1px solid #d0d0d0;
+      border-radius: 0;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: 'Outfit', sans-serif;
+      text-align: right;
+      background: white;
+      color: #0a0a0a;
+      transition: border-color 0.15s;
+    }
+    .onhand-input:focus { outline: none; border-color: #0a0a0a; }
+    .onhand-input.is-edited { border-color: #10b981; background: #f0fdf4; }
+    .onhand-unit { font-size: 12px; color: rgba(0,0,0,0.4); }
+
+    .data-tag {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+    }
+    .tag-predicted { background: #e8f4ff; color: #1a6b9a; }
+    .tag-corrected { background: #dcfce7; color: #166534; }
+
+    .rec-bags { font-family: 'Cooper Black', serif; font-size: 22px; font-weight: 400; }
+    .rec-bags.none { color: #10b981; }
+    .rec-bags.low { color: #d97706; }
+    .rec-bags.high { color: #0a0a0a; }
+    .rec-lbs { font-size: 12px; color: rgba(0,0,0,0.4); margin-top: 2px; }
+
+    .trend-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+    }
+    .up { background: #dcfce7; color: #166534; }
+    .down { background: #fee2e2; color: #991b1b; }
+    .flat { background: #f0f0f0; color: rgba(0,0,0,0.5); }
+
+    /* ── ADMIN ── */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: white;
+      padding: 24px 28px;
+      border: 1px solid #e0e0e0;
+    }
+    .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(0,0,0,0.4); font-weight: 700; margin-bottom: 10px; }
+    .stat-value { font-family: 'Cooper Black', serif; font-size: 36px; font-weight: 400; line-height: 1; color: #0a0a0a; }
+    .stat-sub { font-size: 12px; color: rgba(0,0,0,0.4); margin-top: 8px; }
+
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .dot-green { background: #10b981; }
+    .dot-amber { background: #f59e0b; }
+    .dot-red { background: #ef4444; }
+
+    .footer-note {
+      text-align: center;
+      font-size: 12px;
+      color: rgba(0,0,0,0.4);
+      padding: 8px 0 24px;
+      letter-spacing: 0.02em;
+    }
+    .footer-note strong { color: rgba(0,0,0,0.6); }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 680px) {
+      nav { padding: 0 16px; }
+      .demo-label { display: none; }
+      .order-window { flex-direction: column; gap: 20px; padding: 20px; }
+      .ow-block { padding: 0; }
+      .ow-divider { display: none; }
+      th, td { padding: 12px 14px; }
+      .onhand-input { width: 64px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="announcement">Atomic Coffee Roasters &mdash; Wholesale Partner Portal</div>
+
+<nav>
+  <span class="nav-brand">PAR Ordering</span>
+  <div class="nav-right">
+    <span class="demo-label">Demo account:</span>
+    <select id="account-select" onchange="switchAccount(this.value)">
+      <option value="0">Chase Sapphire Lounge — Logan Airport (Tue delivery)</option>
+      <option value="1">Union Square Donuts — Bow Street (Thu delivery)</option>
+      <option value="2">Row 34 — Boston (Wed delivery)</option>
+    </select>
+    <div class="view-toggle">
+      <button class="view-btn active" id="btn-client" onclick="setView('client', this)">My Orders</button>
+      <button class="view-btn" id="btn-admin" onclick="setView('admin', this)">Admin</button>
+    </div>
+  </div>
+</nav>
+
+<main>
+
+  <!-- CLIENT VIEW -->
+  <div id="client-view">
+    <div id="order-window" class="order-window"></div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Recommended Order</span>
+        <span class="card-hint">On-hand is predicted from your order history. Correct it below if needed.</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Avg Daily Use</th>
+            <th>Safety Stock</th>
+            <th>PAR Target</th>
+            <th>Current On Hand</th>
+            <th>Order (bags)</th>
+            <th>Trend</th>
+          </tr>
+        </thead>
+        <tbody id="par-tbody"></tbody>
+      </table>
+    </div>
+    <p class="footer-note">Questions or changes to your order: <strong>orders@atomicroastery.com</strong></p>
+  </div>
+
+  <!-- ADMIN VIEW -->
+  <div id="admin-view" class="hidden">
+    <div class="summary-grid" id="summary-grid"></div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">All Wholesale Accounts</span>
+        <span class="card-hint">Sorted by predicted order volume this week</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Delivery Day</th>
+            <th>Last Order</th>
+            <th>Cutoff</th>
+            <th>Predicted Vol. (lbs)</th>
+            <th>YoY Trend</th>
+            <th>3-Wk Trend</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="admin-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// Data sourced from Shopify order history — May 1, 2026
+const TODAY = new Date(2026, 4, 1, 9, 0, 0); // 9am
+
+// ------------------------------------------------------------------
+// DATA — real accounts from Shopify (serve-atomic), Phase 1 sample
+// avgDaily derived from 90-day order history; lastOnHand = qty on
+// hand at last confirmed delivery; trends estimated from order cadence
+// ------------------------------------------------------------------
+const ACCOUNTS = [
+  {
+    id: 0,
+    name: 'Chase Sapphire Lounge (Logan Airport)',
+    deliveryDay: 'tuesday',
+    daysOpen: 7,
+    safetyDays: 3,
+    items: [
+      { name: 'House Blend',    sku: 'HSE501', bagLbs: 5, avgDaily: 7.1, yoy: 0.05, w3: 0.03, lastOrder: new Date(2026,3,28), lastOnHand: 50 },
+      { name: 'Cosmo',          sku: 'COS501', bagLbs: 5, avgDaily: 7.1, yoy: 0.08, w3: 0.05, lastOrder: new Date(2026,3,28), lastOnHand: 50 },
+      { name: 'Daydream Decaf', sku: 'DCF501', bagLbs: 5, avgDaily: 8.6, yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,3,28), lastOnHand: 60 },
+    ]
+  },
+  {
+    id: 1,
+    name: 'Union Square Donuts (Bow Street)',
+    deliveryDay: 'thursday',
+    daysOpen: 7,
+    safetyDays: 3,
+    items: [
+      { name: 'Cosmo',          sku: 'COS501', bagLbs: 5, avgDaily: 3.6, yoy: 0.06, w3: 0.04, lastOrder: new Date(2026,3,24), lastOnHand: 25 },
+      { name: 'Black Velvet',   sku: 'BV501',  bagLbs: 5, avgDaily: 4.3, yoy: 0.04, w3: 0.02, lastOrder: new Date(2026,3,24), lastOnHand: 30 },
+      { name: 'Daydream Decaf', sku: 'DCF201', bagLbs: 2, avgDaily: 0.6, yoy: 0.01, w3: 0.00, lastOrder: new Date(2026,3,24), lastOnHand: 4  },
+    ]
+  },
+  {
+    id: 2,
+    name: 'Row 34 (Boston)',
+    deliveryDay: 'wednesday',
+    daysOpen: 6,
+    safetyDays: 3,
+    items: [
+      { name: 'Intensi',                    sku: 'INT501', bagLbs: 5, avgDaily: 1.2, yoy: 0.03, w3: 0.02, lastOrder: new Date(2026,3,29), lastOnHand: 10 },
+      { name: 'Daydream Decaf (Espresso)',   sku: 'DCF205', bagLbs: 2, avgDaily: 0.3, yoy: 0.01, w3: 0.00, lastOrder: new Date(2026,3,29), lastOnHand: 2  },
+    ]
+  }
+];
+
+// User-edited on-hand values keyed by "accountId-itemIdx"
+const edited = {};
+
+// ------------------------------------------------------------------
+// DELIVERY / CUTOFF LOGIC
+// ------------------------------------------------------------------
+const CUTOFF_DAYS_BACK = { monday: 4, tuesday: 5, wednesday: 3, thursday: 3, friday: 3 };
+
+function getDeliveryWindow(deliveryDay) {
+  const DAY = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
+  const targetDow = DAY[deliveryDay];
+  const todayDow  = TODAY.getDay();
+
+  let diff = targetDow - todayDow;
+  if (diff <= 0) diff += 7;
+
+  const delivery = new Date(TODAY);
+  delivery.setDate(TODAY.getDate() + diff);
+  delivery.setHours(0, 0, 0, 0);
+
+  const cutoff = cutoffFor(deliveryDay, delivery);
+
+  if (cutoff <= TODAY) {
+    delivery.setDate(delivery.getDate() + 7);
+    return { delivery, cutoff: cutoffFor(deliveryDay, delivery) };
+  }
+
+  return { delivery, cutoff };
+}
+
+function cutoffFor(deliveryDay, deliveryDate) {
+  const d = new Date(deliveryDate);
+  d.setDate(d.getDate() - (CUTOFF_DAYS_BACK[deliveryDay] || 3));
+  d.setHours(23, 59, 0, 0);
+  return d;
+}
+
+// ------------------------------------------------------------------
+// CALCULATIONS
+// ------------------------------------------------------------------
+function effectiveDaily(item) {
+  const growth = 0.7 * item.yoy + 0.3 * item.w3;
+  return item.avgDaily * (1 + growth);
+}
+
+function predictOnHand(item) {
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const daysSince = Math.floor((TODAY - item.lastOrder) / msPerDay);
+  return Math.max(0, item.lastOnHand - effectiveDaily(item) * daysSince);
+}
+
+function calcPAR(item, daysUntilDelivery, daysOpen, safetyDays) {
+  const daily = effectiveDaily(item);
+  const safetyStock = daily * safetyDays;
+  return daily * (daysUntilDelivery + daysOpen) + safetyStock;
+}
+
+function recBags(item, daysUntilDelivery, currentOnHand, daysOpen, safetyDays) {
+  const par    = calcPAR(item, daysUntilDelivery, daysOpen, safetyDays);
+  const needed = Math.max(0, par - currentOnHand);
+  return Math.ceil(needed / item.bagLbs);
+}
+
+// ------------------------------------------------------------------
+// FORMATTING
+// ------------------------------------------------------------------
+function fmt(d) {
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function fmtShort(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function hoursUntil(d) {
+  return (d - TODAY) / (1000 * 60 * 60);
+}
+function trendClass(pct) {
+  return pct > 0.02 ? 'up' : pct < -0.02 ? 'down' : 'flat';
+}
+function trendArrow(pct) {
+  return pct > 0.02 ? '▲' : pct < -0.02 ? '▼' : '—';
+}
+
+// ------------------------------------------------------------------
+// RENDER: CLIENT VIEW
+// ------------------------------------------------------------------
+function renderClient(accountId) {
+  const acct = ACCOUNTS[accountId];
+  const { delivery, cutoff } = getDeliveryWindow(acct.deliveryDay);
+  const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
+  const hours = hoursUntil(cutoff);
+
+  let urgency = 'ok', badgeClass = 'badge-ok', badgeText = '';
+  if (hours <= 0) {
+    urgency = 'passed'; badgeClass = 'badge-passed'; badgeText = 'Cutoff passed — next delivery shown';
+  } else if (hours <= 24) {
+    urgency = 'urgent'; badgeClass = 'badge-urgent'; badgeText = `⚠ ${Math.round(hours)} hrs left — order now`;
+  } else if (hours <= 48) {
+    urgency = 'warn'; badgeClass = 'badge-warn'; badgeText = `${Math.round(hours)} hrs to order`;
+  } else {
+    badgeText = `${Math.round(hours / 24)} days to order`;
+  }
+
+  const win = document.getElementById('order-window');
+  win.className = `order-window${urgency === 'urgent' ? ' urgent' : urgency === 'warn' ? ' warn' : ''}`;
+  win.innerHTML = `
+    <div class="ow-block">
+      <span class="ow-label">Next Delivery</span>
+      <span class="ow-value">${fmt(delivery)}</span>
+      <span class="ow-sub">${daysUntil} day${daysUntil !== 1 ? 's' : ''} from today</span>
+    </div>
+    <div class="ow-divider"></div>
+    <div class="ow-block">
+      <span class="ow-label">Order Cutoff</span>
+      <span class="ow-value">${fmt(cutoff)}</span>
+      <span class="ow-sub">by 11:59 PM</span>
+    </div>
+    <div class="ow-divider"></div>
+    <div class="ow-block">
+      <span class="ow-label">Window Status</span>
+      <span class="status-badge ${badgeClass}">${badgeText}</span>
+    </div>
+  `;
+
+  const tbody = document.getElementById('par-tbody');
+  tbody.innerHTML = '';
+
+  acct.items.forEach((item, idx) => {
+    const key = `${accountId}-${idx}`;
+    const isEdited = edited[key] !== undefined;
+    const onHand = isEdited ? edited[key] : predictOnHand(item);
+    const daily = effectiveDaily(item);
+    const safetyStock = daily * acct.safetyDays;
+    const parTarget = calcPAR(item, daysUntil, acct.daysOpen, acct.safetyDays);
+    const bags = recBags(item, daysUntil, onHand, acct.daysOpen, acct.safetyDays);
+    const weightedGrowth = 0.7 * item.yoy + 0.3 * item.w3;
+
+    let bagClass = bags === 0 ? 'none' : bags <= 2 ? 'low' : 'high';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <div class="item-name">${item.name}</div>
+        <div class="item-sku">${item.sku}</div>
+      </td>
+      <td>${daily.toFixed(1)} lbs/day</td>
+      <td>${safetyStock.toFixed(1)} lbs</td>
+      <td><strong>${parTarget.toFixed(1)} lbs</strong></td>
+      <td>
+        <div class="onhand-wrap">
+          <input
+            class="onhand-input${isEdited ? ' is-edited' : ''}"
+            type="number" min="0" step="0.5"
+            value="${onHand.toFixed(1)}"
+            data-key="${key}"
+            onchange="editOnHand('${key}', this)"
+          />
+          <span class="onhand-unit">lbs</span>
+          <span class="data-tag ${isEdited ? 'tag-corrected' : 'tag-predicted'}">${isEdited ? 'corrected' : 'predicted'}</span>
+        </div>
+      </td>
+      <td>
+        <div class="rec-bags ${bagClass}">${bags === 0 ? '0' : bags} bag${bags !== 1 ? 's' : ''}</div>
+        <div class="rec-lbs">${bags === 0 ? 'No order needed' : (bags * item.bagLbs) + ' lbs'}</div>
+      </td>
+      <td>
+        <span class="trend-pill ${trendClass(weightedGrowth)}">${trendArrow(weightedGrowth)} ${(weightedGrowth * 100).toFixed(1)}%</span>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function editOnHand(key, input) {
+  const val = parseFloat(input.value);
+  if (!isNaN(val) && val >= 0) {
+    edited[key] = val;
+    input.classList.add('is-edited');
+    renderClient(parseInt(document.getElementById('account-select').value));
+  }
+}
+
+// ------------------------------------------------------------------
+// RENDER: ADMIN VIEW
+// ------------------------------------------------------------------
+function renderAdmin() {
+  let totalPredLbs = 0, yoySum = 0, itemCount = 0;
+
+  ACCOUNTS.forEach(acct => {
+    const { delivery } = getDeliveryWindow(acct.deliveryDay);
+    const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
+    acct.items.forEach(item => {
+      const bags = recBags(item, daysUntil, predictOnHand(item), acct.daysOpen, acct.safetyDays);
+      totalPredLbs += bags * item.bagLbs;
+      yoySum += item.yoy;
+      itemCount++;
+    });
+  });
+
+  const avgYoy = yoySum / itemCount;
+
+  document.getElementById('summary-grid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Active Accounts</div>
+      <div class="stat-value">3</div>
+      <div class="stat-sub">Sample of 331 active accounts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Predicted Volume This Week</div>
+      <div class="stat-value">${totalPredLbs.toFixed(0)} lbs</div>
+      <div class="stat-sub">Across shown accounts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg YoY Growth</div>
+      <div class="stat-value" style="color:${avgYoy >= 0 ? '#10b981' : '#dc2626'}">${avgYoy >= 0 ? '+' : ''}${(avgYoy * 100).toFixed(1)}%</div>
+      <div class="stat-sub">Unweighted avg across all SKUs</div>
+    </div>
+  `;
+
+  const tbody = document.getElementById('admin-tbody');
+  tbody.innerHTML = '';
+
+  const rows = ACCOUNTS.map(acct => {
+    const { delivery, cutoff } = getDeliveryWindow(acct.deliveryDay);
+    const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
+    const hours = hoursUntil(cutoff);
+    const totalLbs = acct.items.reduce((s, item) => s + recBags(item, daysUntil, predictOnHand(item), acct.daysOpen, acct.safetyDays) * item.bagLbs, 0);
+    const avgYoy = acct.items.reduce((s, i) => s + i.yoy, 0) / acct.items.length;
+    const avgW3  = acct.items.reduce((s, i) => s + i.w3,  0) / acct.items.length;
+    const lastOrder = acct.items[0].lastOrder;
+    const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
+    return { acct, delivery, cutoff, hours, daysUntil, totalLbs, avgYoy, avgW3, lastOrder, daysSince };
+  }).sort((a, b) => b.totalLbs - a.totalLbs);
+
+  rows.forEach(({ acct, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince }) => {
+    let status, dotClass;
+    if (daysSince > 21)               { status = 'Overdue';      dotClass = 'dot-red'; }
+    else if (hours <= 24 && hours > 0){ status = 'Cutoff Soon';  dotClass = 'dot-amber'; }
+    else                              { status = 'On Track';     dotClass = 'dot-green'; }
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${acct.name}</strong></td>
+      <td style="text-transform:capitalize">${acct.deliveryDay}</td>
+      <td>${fmtShort(lastOrder)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span></td>
+      <td>${fmt(cutoff)}, 11:59 PM</td>
+      <td><strong>${totalLbs.toFixed(0)} lbs</strong></td>
+      <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy * 100).toFixed(1)}%</span></td>
+      <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3 * 100).toFixed(1)}%</span></td>
+      <td><span class="status-dot ${dotClass}"></span>${status}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ------------------------------------------------------------------
+// NAV
+// ------------------------------------------------------------------
+function setView(view, btn) {
+  document.getElementById('client-view').classList.toggle('hidden', view !== 'client');
+  document.getElementById('admin-view').classList.toggle('hidden', view !== 'admin');
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (view === 'admin') renderAdmin();
+}
+
+function switchAccount(id) {
+  renderClient(parseInt(id));
+}
+
+// Init
+renderClient(0);
+</script>
+</body>
+</html>

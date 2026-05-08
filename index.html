@@ -256,6 +256,11 @@
 
     .hidden { display: none !important; }
 
+    .row-parent td { background: #fafafa; font-weight: 600; border-top: 2px solid #e8e8e8; }
+    .row-child td { background: white; }
+    .row-child td:first-child { padding-left: 40px; font-weight: 400; color: rgba(0,0,0,0.7); font-size: 13px; }
+    .row-child td:first-child::before { content: '└ '; color: rgba(0,0,0,0.25); }
+
     @media (max-width: 680px) {
       nav { padding: 0 16px; }
       .demo-label { display: none; }
@@ -274,15 +279,20 @@
 <nav>
   <span class="nav-brand">PAR Ordering</span>
   <div class="nav-right">
-    <span class="demo-label">Demo account:</span>
-    <select id="account-select" onchange="switchAccount(this.value)">
-      <option value="0">Chase Sapphire Lounge — Logan Airport (Tue delivery)</option>
-      <option value="1">Union Square Donuts — Bow Street (Thu delivery)</option>
-      <option value="2">Row 34 — Boston (Wed delivery)</option>
+    <span class="demo-label" id="demo-label">Demo:</span>
+    <select id="company-select" onchange="switchCompany(this.value)">
+      <option value="0">Cafe Selah</option>
+      <option value="1">Sodexo</option>
+      <option value="2" selected>⚡ Atomic (Internal)</option>
     </select>
-    <div class="view-toggle">
+    <select id="location-select" class="hidden" onchange="switchLocation(this.value)"></select>
+    <div class="view-toggle hidden" id="view-toggle">
       <button class="view-btn active" id="btn-client" onclick="setView('client', this)">My Orders</button>
       <button class="view-btn" id="btn-admin" onclick="setView('admin', this)">Admin</button>
+    </div>
+    <div class="view-toggle hidden" id="atomic-toggle">
+      <button class="view-btn active" id="btn-by-account" onclick="setAtomicView('account', this)">By Account</button>
+      <button class="view-btn" id="btn-by-location" onclick="setAtomicView('location', this)">By Location</button>
     </div>
   </div>
 </nav>
@@ -305,7 +315,7 @@
             <th>Safety Stock</th>
             <th>PAR Target</th>
             <th>Current On Hand</th>
-            <th>Order (bags)</th>
+            <th>Order</th>
             <th>Trend</th>
           </tr>
         </thead>
@@ -313,6 +323,21 @@
       </table>
     </div>
     <p class="footer-note">Questions or changes to your order: <strong>orders@atomicroastery.com</strong></p>
+  </div>
+
+  <!-- ATOMIC INTERNAL VIEW -->
+  <div id="atomic-view" class="hidden">
+    <div class="summary-grid" id="atomic-summary-grid"></div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title" id="atomic-card-title">All Accounts</span>
+        <span class="card-hint" id="atomic-card-hint">Sorted by predicted order volume this week</span>
+      </div>
+      <table>
+        <thead><tr id="atomic-thead"></tr></thead>
+        <tbody id="atomic-tbody"></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- ADMIN VIEW -->
@@ -344,53 +369,79 @@
 </main>
 
 <script>
-// Data sourced from Shopify order history — May 1, 2026
-const TODAY = new Date(2026, 4, 1, 9, 0, 0); // 9am
+const TODAY = new Date();
 
 // ------------------------------------------------------------------
-// DATA — real accounts from Shopify (serve-atomic), Phase 1 sample
-// avgDaily derived from 90-day order history; lastOnHand = qty on
-// hand at last confirmed delivery; trends estimated from order cadence
+// DATA — companies with one or more locations.
+// Single-location companies: no dropdown, no Admin view.
+// Multi-location companies: location dropdown + Admin view.
+// Cafe Selah avgDaily from 90-day Shopify history (Feb 6–May 7 2026).
+// Sodexo entries are demo estimates. Last updated: 2026-05-08.
 // ------------------------------------------------------------------
-const ACCOUNTS = [
+const COMPANIES = [
   {
     id: 0,
-    name: 'Chase Sapphire Lounge (Logan Airport)',
-    deliveryDay: 'tuesday',
-    daysOpen: 7,
-    safetyDays: 3,
-    items: [
-      { name: 'House Blend',    sku: 'HSE501', bagLbs: 5, avgDaily: 7.1, yoy: 0.05, w3: 0.03, lastOrder: new Date(2026,3,28), lastOnHand: 50 },
-      { name: 'Cosmo',          sku: 'COS501', bagLbs: 5, avgDaily: 7.1, yoy: 0.08, w3: 0.05, lastOrder: new Date(2026,3,28), lastOnHand: 50 },
-      { name: 'Daydream Decaf', sku: 'DCF501', bagLbs: 5, avgDaily: 8.6, yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,3,28), lastOnHand: 60 },
+    name: 'Cafe Selah',
+    locations: [
+      {
+        id: 0,
+        name: 'Cafe Selah',
+        deliveryDay: 'wednesday',
+        daysOpen: 6,
+        safetyDays: 3,
+        items: [
+          { name: 'House Blend',      sku: 'HSE501',         usageUnit: 'lbs',     orderUnit: 'bag',  unitsPerOrder: 5,  avgDaily: 1.11, yoy: 0.03, w3: 0.02, lastOrder: new Date(2026,4,4),  lastOnHand: 20.0 },
+          { name: 'Black Velvet',     sku: 'BV501',          usageUnit: 'lbs',     orderUnit: 'bag',  unitsPerOrder: 5,  avgDaily: 0.67, yoy: 0.05, w3: 0.03, lastOrder: new Date(2026,4,4),  lastOnHand: 10.0 },
+          { name: 'Premium Matcha',   sku: 'SMITH-WS-PMTCH', usageUnit: 'tins',    orderUnit: 'case', unitsPerOrder: 12, avgDaily: 0.80, yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,4,4),  lastOnHand: 24.0 },
+          { name: 'Chai Concentrate', sku: 'MF-CHAI',        usageUnit: 'cartons', orderUnit: 'case', unitsPerOrder: 6,  avgDaily: 0.20, yoy: 0.04, w3: 0.02, lastOrder: new Date(2026,3,28), lastOnHand: 6.0  },
+          { name: 'Cold Brew Cans',   sku: 'CANS01',         usageUnit: 'cans',    orderUnit: 'case', unitsPerOrder: 12, avgDaily: 1.07, yoy: 0.08, w3: 0.05, lastOrder: new Date(2026,3,27), lastOnHand: 36.0 },
+          { name: 'Nitro Cans',       sku: 'CANS02',         usageUnit: 'cans',    orderUnit: 'case', unitsPerOrder: 12, avgDaily: 0.40, yoy: 0.06, w3: 0.04, lastOrder: new Date(2026,3,27), lastOnHand: 12.0 },
+        ]
+      }
     ]
   },
   {
     id: 1,
-    name: 'Union Square Donuts (Bow Street)',
-    deliveryDay: 'thursday',
-    daysOpen: 7,
-    safetyDays: 3,
-    items: [
-      { name: 'Cosmo',          sku: 'COS501', bagLbs: 5, avgDaily: 3.6, yoy: 0.06, w3: 0.04, lastOrder: new Date(2026,3,24), lastOnHand: 25 },
-      { name: 'Black Velvet',   sku: 'BV501',  bagLbs: 5, avgDaily: 4.3, yoy: 0.04, w3: 0.02, lastOrder: new Date(2026,3,24), lastOnHand: 30 },
-      { name: 'Daydream Decaf', sku: 'DCF201', bagLbs: 2, avgDaily: 0.6, yoy: 0.01, w3: 0.00, lastOrder: new Date(2026,3,24), lastOnHand: 4  },
+    name: 'Sodexo',
+    locations: [
+      {
+        id: 0,
+        name: 'Endicott College',
+        deliveryDay: 'tuesday',
+        daysOpen: 5,
+        safetyDays: 2,
+        items: [
+          { name: 'House Blend',     sku: 'HSE501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 5.0,  yoy: 0.04, w3: 0.02, lastOrder: new Date(2026,4,5), lastOnHand: 50.0 },
+          { name: 'Daydream Decaf',  sku: 'DCF501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 2.0,  yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,4,5), lastOnHand: 20.0 },
+          { name: 'Cold Brew Conc.', sku: 'CONC-BIB1', usageUnit: 'boxes', orderUnit: 'box', unitsPerOrder: 1, avgDaily: 0.30, yoy: 0.10, w3: 0.05, lastOrder: new Date(2026,4,5), lastOnHand: 3.0  },
+        ]
+      },
+      {
+        id: 1,
+        name: 'Gordon College',
+        deliveryDay: 'thursday',
+        daysOpen: 5,
+        safetyDays: 2,
+        items: [
+          { name: 'House Blend',     sku: 'HSE501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 3.5,  yoy: 0.03, w3: 0.01, lastOrder: new Date(2026,4,1), lastOnHand: 35.0 },
+          { name: 'Daydream Decaf',  sku: 'DCF501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 1.5,  yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,4,1), lastOnHand: 15.0 },
+          { name: 'Cold Brew Conc.', sku: 'CONC-BIB1', usageUnit: 'boxes', orderUnit: 'box', unitsPerOrder: 1, avgDaily: 0.20, yoy: 0.08, w3: 0.04, lastOrder: new Date(2026,4,1), lastOnHand: 2.0  },
+        ]
+      }
     ]
   },
   {
     id: 2,
-    name: 'Row 34 (Boston)',
-    deliveryDay: 'wednesday',
-    daysOpen: 6,
-    safetyDays: 3,
-    items: [
-      { name: 'Intensi',                    sku: 'INT501', bagLbs: 5, avgDaily: 1.2, yoy: 0.03, w3: 0.02, lastOrder: new Date(2026,3,29), lastOnHand: 10 },
-      { name: 'Daydream Decaf (Espresso)',   sku: 'DCF205', bagLbs: 2, avgDaily: 0.3, yoy: 0.01, w3: 0.00, lastOrder: new Date(2026,3,29), lastOnHand: 2  },
-    ]
+    name: 'Atomic Coffee Roasters (Internal)',
+    isInternal: true,
+    locations: []
   }
 ];
 
-// User-edited on-hand values keyed by "accountId-itemIdx"
+let currentCompanyId = 0;
+let currentLocationId = 0;
+
+// Keyed by "companyId-locationId-itemIdx"
 const edited = {};
 
 // ------------------------------------------------------------------
@@ -443,14 +494,12 @@ function predictOnHand(item) {
 
 function calcPAR(item, daysUntilDelivery, daysOpen, safetyDays) {
   const daily = effectiveDaily(item);
-  const safetyStock = daily * safetyDays;
-  return daily * (daysUntilDelivery + daysOpen) + safetyStock;
+  return daily * (daysUntilDelivery + daysOpen) + daily * safetyDays;
 }
 
-function recBags(item, daysUntilDelivery, currentOnHand, daysOpen, safetyDays) {
-  const par    = calcPAR(item, daysUntilDelivery, daysOpen, safetyDays);
-  const needed = Math.max(0, par - currentOnHand);
-  return Math.ceil(needed / item.bagLbs);
+function recOrders(item, daysUntilDelivery, currentOnHand, daysOpen, safetyDays) {
+  const needed = Math.max(0, calcPAR(item, daysUntilDelivery, daysOpen, safetyDays) - currentOnHand);
+  return Math.ceil(needed / item.unitsPerOrder);
 }
 
 // ------------------------------------------------------------------
@@ -462,22 +511,16 @@ function fmt(d) {
 function fmtShort(d) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
-function hoursUntil(d) {
-  return (d - TODAY) / (1000 * 60 * 60);
-}
-function trendClass(pct) {
-  return pct > 0.02 ? 'up' : pct < -0.02 ? 'down' : 'flat';
-}
-function trendArrow(pct) {
-  return pct > 0.02 ? '▲' : pct < -0.02 ? '▼' : '—';
-}
+function hoursUntil(d) { return (d - TODAY) / (1000 * 60 * 60); }
+function trendClass(pct) { return pct > 0.02 ? 'up' : pct < -0.02 ? 'down' : 'flat'; }
+function trendArrow(pct) { return pct > 0.02 ? '▲' : pct < -0.02 ? '▼' : '—'; }
 
 // ------------------------------------------------------------------
 // RENDER: CLIENT VIEW
 // ------------------------------------------------------------------
-function renderClient(accountId) {
-  const acct = ACCOUNTS[accountId];
-  const { delivery, cutoff } = getDeliveryWindow(acct.deliveryDay);
+function renderClient(companyId, locationId) {
+  const loc = COMPANIES[companyId].locations[locationId];
+  const { delivery, cutoff } = getDeliveryWindow(loc.deliveryDay);
   const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
   const hours = hoursUntil(cutoff);
 
@@ -516,17 +559,17 @@ function renderClient(accountId) {
   const tbody = document.getElementById('par-tbody');
   tbody.innerHTML = '';
 
-  acct.items.forEach((item, idx) => {
-    const key = `${accountId}-${idx}`;
+  loc.items.forEach((item, idx) => {
+    const key = `${companyId}-${locationId}-${idx}`;
     const isEdited = edited[key] !== undefined;
     const onHand = isEdited ? edited[key] : predictOnHand(item);
     const daily = effectiveDaily(item);
-    const safetyStock = daily * acct.safetyDays;
-    const parTarget = calcPAR(item, daysUntil, acct.daysOpen, acct.safetyDays);
-    const bags = recBags(item, daysUntil, onHand, acct.daysOpen, acct.safetyDays);
+    const safetyStock = daily * loc.safetyDays;
+    const parTarget = calcPAR(item, daysUntil, loc.daysOpen, loc.safetyDays);
+    const orders = recOrders(item, daysUntil, onHand, loc.daysOpen, loc.safetyDays);
     const weightedGrowth = 0.7 * item.yoy + 0.3 * item.w3;
-
-    let bagClass = bags === 0 ? 'none' : bags <= 2 ? 'low' : 'high';
+    const orderLabel = orders !== 1 ? item.orderUnit + 's' : item.orderUnit;
+    const showSub = orders > 0 && item.unitsPerOrder > 1;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -534,25 +577,24 @@ function renderClient(accountId) {
         <div class="item-name">${item.name}</div>
         <div class="item-sku">${item.sku}</div>
       </td>
-      <td>${daily.toFixed(1)} lbs/day</td>
-      <td>${safetyStock.toFixed(1)} lbs</td>
-      <td><strong>${parTarget.toFixed(1)} lbs</strong></td>
+      <td>${daily.toFixed(1)} ${item.usageUnit}/day</td>
+      <td>${safetyStock.toFixed(1)} ${item.usageUnit}</td>
+      <td><strong>${parTarget.toFixed(1)} ${item.usageUnit}</strong></td>
       <td>
         <div class="onhand-wrap">
           <input
             class="onhand-input${isEdited ? ' is-edited' : ''}"
             type="number" min="0" step="0.5"
             value="${onHand.toFixed(1)}"
-            data-key="${key}"
             onchange="editOnHand('${key}', this)"
           />
-          <span class="onhand-unit">lbs</span>
+          <span class="onhand-unit">${item.usageUnit}</span>
           <span class="data-tag ${isEdited ? 'tag-corrected' : 'tag-predicted'}">${isEdited ? 'corrected' : 'predicted'}</span>
         </div>
       </td>
       <td>
-        <div class="rec-bags ${bagClass}">${bags === 0 ? '0' : bags} bag${bags !== 1 ? 's' : ''}</div>
-        <div class="rec-lbs">${bags === 0 ? 'No order needed' : (bags * item.bagLbs) + ' lbs'}</div>
+        <div class="rec-bags ${orders === 0 ? 'none' : orders <= 2 ? 'low' : 'high'}">${orders} ${orderLabel}</div>
+        <div class="rec-lbs">${orders === 0 ? 'No order needed' : showSub ? (orders * item.unitsPerOrder).toFixed(0) + ' ' + item.usageUnit : ''}</div>
       </td>
       <td>
         <span class="trend-pill ${trendClass(weightedGrowth)}">${trendArrow(weightedGrowth)} ${(weightedGrowth * 100).toFixed(1)}%</span>
@@ -567,39 +609,41 @@ function editOnHand(key, input) {
   if (!isNaN(val) && val >= 0) {
     edited[key] = val;
     input.classList.add('is-edited');
-    renderClient(parseInt(document.getElementById('account-select').value));
+    renderClient(currentCompanyId, currentLocationId);
   }
 }
 
 // ------------------------------------------------------------------
-// RENDER: ADMIN VIEW
+// RENDER: ADMIN VIEW (scoped to current company's locations)
 // ------------------------------------------------------------------
-function renderAdmin() {
+function renderAdmin(companyId) {
+  const company = COMPANIES[companyId];
   let totalPredLbs = 0, yoySum = 0, itemCount = 0;
 
-  ACCOUNTS.forEach(acct => {
-    const { delivery } = getDeliveryWindow(acct.deliveryDay);
+  company.locations.forEach(loc => {
+    const { delivery } = getDeliveryWindow(loc.deliveryDay);
     const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
-    acct.items.forEach(item => {
-      const bags = recBags(item, daysUntil, predictOnHand(item), acct.daysOpen, acct.safetyDays);
-      totalPredLbs += bags * item.bagLbs;
+    loc.items.forEach(item => {
+      const orders = recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays);
+      if (item.usageUnit === 'lbs') totalPredLbs += orders * item.unitsPerOrder;
       yoySum += item.yoy;
       itemCount++;
     });
   });
 
   const avgYoy = yoySum / itemCount;
+  const locCount = company.locations.length;
 
   document.getElementById('summary-grid').innerHTML = `
     <div class="stat-card">
-      <div class="stat-label">Active Accounts</div>
-      <div class="stat-value">3</div>
-      <div class="stat-sub">Sample of 331 active accounts</div>
+      <div class="stat-label">Locations</div>
+      <div class="stat-value">${locCount}</div>
+      <div class="stat-sub">${company.name}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Predicted Volume This Week</div>
+      <div class="stat-label">Predicted Coffee This Week</div>
       <div class="stat-value">${totalPredLbs.toFixed(0)} lbs</div>
-      <div class="stat-sub">Across shown accounts</div>
+      <div class="stat-sub">Coffee only — across all locations</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Avg YoY Growth</div>
@@ -611,28 +655,30 @@ function renderAdmin() {
   const tbody = document.getElementById('admin-tbody');
   tbody.innerHTML = '';
 
-  const rows = ACCOUNTS.map(acct => {
-    const { delivery, cutoff } = getDeliveryWindow(acct.deliveryDay);
+  const rows = company.locations.map(loc => {
+    const { delivery, cutoff } = getDeliveryWindow(loc.deliveryDay);
     const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
     const hours = hoursUntil(cutoff);
-    const totalLbs = acct.items.reduce((s, item) => s + recBags(item, daysUntil, predictOnHand(item), acct.daysOpen, acct.safetyDays) * item.bagLbs, 0);
-    const avgYoy = acct.items.reduce((s, i) => s + i.yoy, 0) / acct.items.length;
-    const avgW3  = acct.items.reduce((s, i) => s + i.w3,  0) / acct.items.length;
-    const lastOrder = acct.items[0].lastOrder;
+    const totalLbs = loc.items
+      .filter(i => i.usageUnit === 'lbs')
+      .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays) * item.unitsPerOrder, 0);
+    const avgYoy = loc.items.reduce((s, i) => s + i.yoy, 0) / loc.items.length;
+    const avgW3  = loc.items.reduce((s, i) => s + i.w3,  0) / loc.items.length;
+    const lastOrder = loc.items[0].lastOrder;
     const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
-    return { acct, delivery, cutoff, hours, daysUntil, totalLbs, avgYoy, avgW3, lastOrder, daysSince };
+    return { loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince };
   }).sort((a, b) => b.totalLbs - a.totalLbs);
 
-  rows.forEach(({ acct, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince }) => {
+  rows.forEach(({ loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince }) => {
     let status, dotClass;
-    if (daysSince > 21)               { status = 'Overdue';      dotClass = 'dot-red'; }
-    else if (hours <= 24 && hours > 0){ status = 'Cutoff Soon';  dotClass = 'dot-amber'; }
-    else                              { status = 'On Track';     dotClass = 'dot-green'; }
+    if (daysSince > 21)                { status = 'Overdue';     dotClass = 'dot-red'; }
+    else if (hours <= 24 && hours > 0) { status = 'Cutoff Soon'; dotClass = 'dot-amber'; }
+    else                               { status = 'On Track';    dotClass = 'dot-green'; }
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><strong>${acct.name}</strong></td>
-      <td style="text-transform:capitalize">${acct.deliveryDay}</td>
+      <td><strong>${loc.name}</strong></td>
+      <td style="text-transform:capitalize">${loc.deliveryDay}</td>
       <td>${fmtShort(lastOrder)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span></td>
       <td>${fmt(cutoff)}, 11:59 PM</td>
       <td><strong>${totalLbs.toFixed(0)} lbs</strong></td>
@@ -645,22 +691,220 @@ function renderAdmin() {
 }
 
 // ------------------------------------------------------------------
+// RENDER: ATOMIC INTERNAL — all companies flattened or rolled up
+// ------------------------------------------------------------------
+function allLocations() {
+  return COMPANIES.filter(c => !c.isInternal).flatMap(c =>
+    c.locations.map(l => ({ company: c, loc: l }))
+  );
+}
+
+function locationSummary(loc) {
+  const { delivery, cutoff } = getDeliveryWindow(loc.deliveryDay);
+  const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
+  const hours = hoursUntil(cutoff);
+  const totalLbs = loc.items
+    .filter(i => i.usageUnit === 'lbs')
+    .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays) * item.unitsPerOrder, 0);
+  const avgYoy = loc.items.reduce((s, i) => s + i.yoy, 0) / loc.items.length;
+  const avgW3  = loc.items.reduce((s, i) => s + i.w3,  0) / loc.items.length;
+  const lastOrder = loc.items.reduce((latest, i) => i.lastOrder > latest ? i.lastOrder : latest, loc.items[0].lastOrder);
+  const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
+  let status, dotClass;
+  if (daysSince > 21)                { status = 'Overdue';     dotClass = 'dot-red'; }
+  else if (hours <= 24 && hours > 0) { status = 'Cutoff Soon'; dotClass = 'dot-amber'; }
+  else                               { status = 'On Track';    dotClass = 'dot-green'; }
+  return { cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass };
+}
+
+function renderAtomicByLocation() {
+  document.getElementById('atomic-card-title').textContent = 'All Locations';
+  document.getElementById('atomic-thead').innerHTML = `
+    <th>Account</th><th>Location</th><th>Delivery Day</th>
+    <th>Last Order</th><th>Predicted Vol. (lbs)</th>
+    <th>YoY Trend</th><th>3-Wk Trend</th><th>Status</th>`;
+
+  const rows = allLocations().map(({ company, loc }) => {
+    const s = locationSummary(loc);
+    return { company, loc, ...s };
+  }).sort((a, b) => b.totalLbs - a.totalLbs);
+
+  document.getElementById('atomic-tbody').innerHTML = rows.map(({ company, loc, cutoff, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => `
+    <tr>
+      <td style="color:rgba(0,0,0,0.45);font-size:13px">${company.name}</td>
+      <td><strong>${loc.name}</strong></td>
+      <td style="text-transform:capitalize">${loc.deliveryDay}</td>
+      <td>${fmtShort(lastOrder)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span></td>
+      <td><strong>${totalLbs.toFixed(0)} lbs</strong></td>
+      <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
+      <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
+      <td><span class="status-dot ${dotClass}"></span>${status}</td>
+    </tr>`).join('');
+}
+
+function renderAtomicByAccount() {
+  document.getElementById('atomic-card-title').textContent = 'All Accounts';
+  document.getElementById('atomic-thead').innerHTML = `
+    <th>Account</th><th>Delivery Day</th>
+    <th>Last Order</th><th>Predicted Vol. (lbs)</th>
+    <th>YoY Trend</th><th>3-Wk Trend</th><th>Status</th>`;
+
+  const companies = COMPANIES.filter(c => !c.isInternal);
+  const rows = companies.map(company => {
+    const summaries = company.locations.map(loc => ({ loc, ...locationSummary(loc) }));
+    const totalLbs = summaries.reduce((s, r) => s + r.totalLbs, 0);
+    const avgYoy   = summaries.reduce((s, r) => s + r.avgYoy, 0) / summaries.length;
+    const avgW3    = summaries.reduce((s, r) => s + r.avgW3,  0) / summaries.length;
+    const lastOrder = summaries.reduce((latest, r) => r.lastOrder > latest ? r.lastOrder : latest, summaries[0].lastOrder);
+    const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
+    const worstStatus = summaries.find(r => r.status === 'Overdue') ? 'Overdue'
+      : summaries.find(r => r.status === 'Cutoff Soon') ? 'Cutoff Soon' : 'On Track';
+    const dotClass = worstStatus === 'Overdue' ? 'dot-red' : worstStatus === 'Cutoff Soon' ? 'dot-amber' : 'dot-green';
+    return { company, summaries, totalLbs, avgYoy, avgW3, lastOrder, daysSince, worstStatus, dotClass };
+  }).sort((a, b) => b.totalLbs - a.totalLbs);
+
+  const html = rows.flatMap(({ company, summaries, totalLbs, avgYoy, avgW3, lastOrder, daysSince, worstStatus, dotClass }) => {
+    const isMulti = company.locations.length > 1;
+    const deliveryDays = [...new Set(company.locations.map(l => l.deliveryDay))]
+      .map(d => d[0].toUpperCase() + d.slice(1, 3)).join(', ');
+
+    // Parent row — always shown
+    const parentRow = `<tr class="row-parent">
+      <td>${company.name}${isMulti ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${company.locations.length} locations</span>` : ''}</td>
+      <td>${deliveryDays}</td>
+      <td>${fmtShort(lastOrder)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span></td>
+      <td><strong>${totalLbs.toFixed(0)} lbs</strong></td>
+      <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
+      <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
+      <td><span class="status-dot ${dotClass}"></span>${worstStatus}</td>
+    </tr>`;
+
+    // Child rows — only for multi-location companies
+    const childRows = isMulti ? summaries.map(({ loc, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => `
+      <tr class="row-child">
+        <td>${loc.name}</td>
+        <td style="text-transform:capitalize">${loc.deliveryDay}</td>
+        <td>${fmtShort(lLast)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${lDays}d ago)</span></td>
+        <td>${lLbs.toFixed(0)} lbs</td>
+        <td><span class="trend-pill ${trendClass(lYoy)}">${trendArrow(lYoy)} ${(lYoy*100).toFixed(1)}%</span></td>
+        <td><span class="trend-pill ${trendClass(lW3)}">${trendArrow(lW3)} ${(lW3*100).toFixed(1)}%</span></td>
+        <td><span class="status-dot ${lDot}"></span>${status}</td>
+      </tr>`).join('') : '';
+
+    return [parentRow, childRows];
+  });
+
+  document.getElementById('atomic-tbody').innerHTML = html.join('');
+}
+
+function renderAtomicSummary() {
+  const locs = allLocations();
+  const totalLbs = locs.reduce((s, { loc }) => {
+    const { delivery } = getDeliveryWindow(loc.deliveryDay);
+    const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
+    return s + loc.items.filter(i => i.usageUnit === 'lbs').reduce((ss, item) =>
+      ss + recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays) * item.unitsPerOrder, 0);
+  }, 0);
+  const allItems = locs.flatMap(({ loc }) => loc.items);
+  const avgYoy = allItems.reduce((s, i) => s + i.yoy, 0) / allItems.length;
+  const companies = COMPANIES.filter(c => !c.isInternal);
+
+  document.getElementById('atomic-summary-grid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Active Accounts</div>
+      <div class="stat-value">${companies.length}</div>
+      <div class="stat-sub">${locs.length} total location${locs.length !== 1 ? 's' : ''}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Predicted Coffee This Week</div>
+      <div class="stat-value">${totalLbs.toFixed(0)} lbs</div>
+      <div class="stat-sub">Coffee only — all accounts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg YoY Growth</div>
+      <div class="stat-value" style="color:${avgYoy >= 0 ? '#10b981' : '#dc2626'}">${avgYoy >= 0 ? '+' : ''}${(avgYoy*100).toFixed(1)}%</div>
+      <div class="stat-sub">Unweighted avg across all SKUs</div>
+    </div>`;
+}
+
+function setAtomicView(view, btn) {
+  document.querySelectorAll('#atomic-toggle .view-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAtomicSummary();
+  if (view === 'account') renderAtomicByAccount();
+  else renderAtomicByLocation();
+}
+
+// ------------------------------------------------------------------
 // NAV
 // ------------------------------------------------------------------
 function setView(view, btn) {
   document.getElementById('client-view').classList.toggle('hidden', view !== 'client');
   document.getElementById('admin-view').classList.toggle('hidden', view !== 'admin');
+  document.getElementById('atomic-view').classList.add('hidden');
   document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  if (view === 'admin') renderAdmin();
+  if (view === 'admin') renderAdmin(currentCompanyId);
 }
 
-function switchAccount(id) {
-  renderClient(parseInt(id));
+function switchCompany(id) {
+  currentCompanyId = parseInt(id);
+  currentLocationId = 0;
+  const company = COMPANIES[currentCompanyId];
+
+  const locSelect   = document.getElementById('location-select');
+  const viewToggle  = document.getElementById('view-toggle');
+  const atomicToggle = document.getElementById('atomic-toggle');
+
+  // Reset all panels
+  document.getElementById('client-view').classList.add('hidden');
+  document.getElementById('admin-view').classList.add('hidden');
+  document.getElementById('atomic-view').classList.add('hidden');
+  locSelect.classList.add('hidden');
+  viewToggle.classList.add('hidden');
+  atomicToggle.classList.add('hidden');
+
+  const companySelect = document.getElementById('company-select');
+  const demoLabel     = document.getElementById('demo-label');
+
+  if (company.isInternal) {
+    companySelect.classList.remove('hidden');
+    demoLabel.classList.remove('hidden');
+    atomicToggle.classList.remove('hidden');
+    document.getElementById('atomic-view').classList.remove('hidden');
+    document.querySelectorAll('#atomic-toggle .view-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-by-account').classList.add('active');
+    renderAtomicSummary();
+    renderAtomicByAccount();
+    return;
+  }
+
+  companySelect.classList.add('hidden');
+  demoLabel.classList.add('hidden');
+
+  const isMulti = company.locations.length > 1;
+  if (isMulti) {
+    locSelect.innerHTML = company.locations.map((l, i) =>
+      `<option value="${i}">${l.name}</option>`
+    ).join('');
+    locSelect.classList.remove('hidden');
+    viewToggle.classList.remove('hidden');
+  } else {
+    document.querySelectorAll('#view-toggle .view-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-client').classList.add('active');
+  }
+
+  document.getElementById('client-view').classList.remove('hidden');
+  renderClient(currentCompanyId, 0);
 }
 
-// Init
-renderClient(0);
+function switchLocation(id) {
+  currentLocationId = parseInt(id);
+  renderClient(currentCompanyId, currentLocationId);
+}
+
+// Init — start on Atomic so the account selector is visible for demo navigation
+switchCompany(2);
 </script>
 </body>
 </html>

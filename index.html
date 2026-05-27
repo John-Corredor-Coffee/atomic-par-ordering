@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <script>if(sessionStorage.getItem('acr_auth')!=='ok'&&!['localhost','127.0.0.1'].includes(location.hostname)){location.replace('https://john-corredor-coffee.github.io/atomic-dashboard/?return='+encodeURIComponent(location.href));}</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PAR Ordering — Atomic Coffee Roasters</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -52,7 +53,6 @@
       letter-spacing: 0.02em;
     }
     .nav-right { display: flex; align-items: center; gap: 12px; }
-    .demo-label { font-size: 12px; color: rgba(0,0,0,0.4); letter-spacing: 0.03em; }
 
     select {
       background: #ffffff;
@@ -151,6 +151,15 @@
     }
     .card-hint { font-size: 12px; color: rgba(0,0,0,0.4); }
 
+    .account-tabs { display: flex; gap: 0; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; }
+    .account-tab {
+      padding: 6px 16px; font-size: 12px; font-weight: 600; font-family: 'Outfit', sans-serif;
+      letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+      background: white; border: none; color: rgba(0,0,0,0.45); transition: background 0.12s, color 0.12s;
+    }
+    .account-tab + .account-tab { border-left: 1px solid #e0e0e0; }
+    .account-tab.active { background: #0a0a0a; color: white; }
+
     /* ── TABLE ── */
     table { width: 100%; border-collapse: collapse; }
     th {
@@ -164,6 +173,11 @@
       border-bottom: 1px solid #e8e8e8;
       font-weight: 700;
     }
+    th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.sortable:hover { background: #f0f0ee; color: rgba(0,0,0,0.6); }
+    th.sort-active { color: rgba(0,0,0,0.75); }
+    .sort-ind { margin-left: 3px; font-size: 9px; opacity: 0.35; }
+    th.sort-active .sort-ind { opacity: 1; }
     td {
       padding: 16px 24px;
       border-bottom: 1px solid #f0f0f0;
@@ -257,19 +271,127 @@
     .hidden { display: none !important; }
 
     .row-parent td { background: #fafafa; font-weight: 600; border-top: 2px solid #e8e8e8; }
+    .row-parent.collapsible { cursor: pointer; user-select: none; }
+    .row-parent.collapsible:hover td { background: #f0f0ee; }
     .row-child td { background: white; }
     .row-child td:first-child { padding-left: 40px; font-weight: 400; color: rgba(0,0,0,0.7); font-size: 13px; }
     .row-child td:first-child::before { content: '└ '; color: rgba(0,0,0,0.25); }
+    .collapse-chevron { display: inline-block; margin-right: 6px; color: rgba(0,0,0,0.3); font-size: 11px; transition: transform 0.15s; }
+    .row-parent.collapsed .collapse-chevron { transform: rotate(-90deg); }
+    .row-at-risk td { background: #fff0f0 !important; }
+    .row-at-risk.row-parent td { background: #ffe8e8 !important; }
+    .row-at-risk.row-parent.collapsible:hover td { background: #fdd !important; }
+    .row-needs-review-header td { background: #1a0a0a !important; color: white !important; }
+    .row-needs-review-header { cursor: pointer; }
+    .row-needs-review-header:hover td { background: #2d1212 !important; }
+    .row-needs-review-header .collapse-chevron { color: rgba(255,255,255,0.5); }
+    .can-group-header .item-sku { color: rgba(0,0,0,0.45); font-size: 11px; }
+    input[type=number].onhand-input::-webkit-inner-spin-button,
+    input[type=number].onhand-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number].onhand-input { -moz-appearance: textfield; text-align: center; width: 48px; }
+    .onhand-btn {
+      background: #f0f0f0; border: 1px solid #d0d0d0; border-radius: 4px;
+      width: 24px; height: 28px; font-size: 15px; line-height: 1;
+      cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+      padding: 0; color: #333;
+    }
+    .onhand-btn:hover { background: #e0e0e0; }
+    .onhand-btn:active { background: #ccc; }
 
     @media (max-width: 680px) {
       nav { padding: 0 16px; }
-      .demo-label { display: none; }
       .order-window { flex-direction: column; gap: 20px; padding: 20px; }
       .ow-block { padding: 0; }
       .ow-divider { display: none; }
       th, td { padding: 12px 14px; }
       .onhand-input { width: 64px; }
     }
+
+    /* ── SETTINGS BUTTON ── */
+    .settings-btn {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      color: rgba(0,0,0,0.45); background: none; border: 1px solid #d0d0d0;
+      padding: 7px 14px; cursor: pointer; font-family: 'Outfit', sans-serif;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .settings-btn:hover, .settings-btn.open { border-color: #0a0a0a; color: #0a0a0a; }
+
+    /* ── CONFIG PANEL ── */
+    .config-panel {
+      background: #fff; border-bottom: 2px solid #e8e8e8;
+      padding: 16px 32px; display: flex; align-items: flex-end; gap: 32px; flex-wrap: wrap;
+    }
+    .cf-field { display: flex; flex-direction: column; gap: 5px; }
+    .cf-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(0,0,0,0.45); }
+    .cf-sub { font-size: 11px; color: rgba(0,0,0,0.35); line-height: 1.3; max-width: 210px; }
+    .cf-input {
+      width: 76px; padding: 7px 10px; border: 1px solid #d0d0d0;
+      font-size: 15px; font-weight: 600; font-family: 'Outfit', sans-serif; color: #0a0a0a; background: white;
+    }
+    .cf-input:focus { outline: none; border-color: #0a0a0a; }
+    .admin-search {
+      padding: 6px 12px; border: 1px solid #d0d0d0; border-radius: 4px;
+      font-size: 13px; font-family: 'Outfit', sans-serif; color: #0a0a0a; background: white;
+      width: 220px;
+    }
+    .admin-search:focus { outline: none; border-color: #0a0a0a; }
+    .admin-search::placeholder { color: rgba(0,0,0,0.35); }
+    .cf-readonly {
+      display: inline-block; min-width: 76px; padding: 7px 10px;
+      background: #f4f4f2; border: 1px solid #e8e8e8;
+      font-size: 15px; font-weight: 600; color: rgba(0,0,0,0.45);
+    }
+    .cf-reset {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      color: rgba(0,0,0,0.38); background: none; border: 1px solid #d8d8d8;
+      padding: 7px 16px; cursor: pointer; font-family: 'Outfit', sans-serif; align-self: flex-end;
+    }
+    .cf-reset:hover { border-color: #0a0a0a; color: #0a0a0a; }
+    .cf-divider { width: 1px; height: 44px; background: #e8e8e8; align-self: flex-end; margin-bottom: 8px; }
+
+    /* ── SUMMARY STRIP ── */
+    .summary-strip {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: #0a0a0a; color: white; padding: 12px 32px;
+      display: flex; align-items: center; gap: 32px; z-index: 200; flex-wrap: wrap;
+      transform: translateY(calc(100% - 6px)); transition: transform 0.2s ease;
+    }
+    .summary-strip:hover { transform: translateY(0); }
+    .summary-strip::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0;
+      height: 6px; background: #333; cursor: ns-resize;
+    }
+    .ss-item { display: flex; flex-direction: column; gap: 2px; }
+    .ss-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.45); }
+    .ss-value { font-family: 'Cooper Black', serif; font-size: 22px; font-weight: 400; color: white; }
+    .ss-value.warn { color: #fbbf24; }
+    .ss-value.alert { color: #f87171; }
+    .ss-divider { width: 1px; height: 36px; background: rgba(255,255,255,0.12); }
+    .ss-dismiss {
+      margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      color: rgba(255,255,255,0.3); background: none; border: 1px solid rgba(255,255,255,0.15);
+      padding: 5px 12px; cursor: pointer; font-family: 'Outfit', sans-serif;
+    }
+    .ss-dismiss:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.4); }
+
+    /* ── PAGE HEADER ── */
+    .page-header { margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid #e8e8e8; }
+    .page-header h1 { font-family: 'Cooper Black', serif; font-size: 28px; font-weight: 400; color: #0a0a0a; margin-bottom: 8px; }
+    .page-header p { font-size: 14px; color: rgba(0,0,0,0.5); line-height: 1.65; max-width: 580px; }
+
+    /* ── TOOLTIPS ── */
+    [data-tip] { position: relative; }
+    [data-tip]::after {
+      content: attr(data-tip);
+      position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+      background: #1a1a1a; color: rgba(255,255,255,0.9);
+      font-size: 12px; font-weight: 400; font-family: 'Outfit', sans-serif;
+      letter-spacing: 0; text-transform: none;
+      padding: 8px 12px; white-space: normal; pointer-events: none;
+      opacity: 0; transition: opacity 0.15s; z-index: 500;
+      width: 220px; text-align: left; line-height: 1.45;
+    }
+    [data-tip]:hover::after { opacity: 1; }
   </style>
 </head>
 <body>
@@ -279,11 +401,8 @@
 <nav>
   <span class="nav-brand">PAR Ordering</span>
   <div class="nav-right">
-    <span class="demo-label" id="demo-label">Demo:</span>
     <select id="company-select" onchange="switchCompany(this.value)">
-      <option value="0">Cafe Selah</option>
-      <option value="1">Sodexo</option>
-      <option value="2" selected>⚡ Atomic (Internal)</option>
+      <option>Loading…</option>
     </select>
     <select id="location-select" class="hidden" onchange="switchLocation(this.value)"></select>
     <div class="view-toggle hidden" id="view-toggle">
@@ -294,13 +413,40 @@
       <button class="view-btn active" id="btn-by-account" onclick="setAtomicView('account', this)">By Account</button>
       <button class="view-btn" id="btn-by-location" onclick="setAtomicView('location', this)">By Location</button>
     </div>
+    <button class="settings-btn" id="settings-toggle" onclick="toggleSettings()">Settings</button>
   </div>
 </nav>
+
+<!-- CONFIG PANEL -->
+<div id="config-panel" class="config-panel hidden">
+  <div class="cf-field">
+    <label class="cf-label" for="cfg-days-open">Days Open / Week</label>
+    <input class="cf-input" type="number" id="cfg-days-open" min="1" max="7" value="7" oninput="applyConfig()">
+    <span class="cf-sub">How many days your location operates — reduces how much we recommend ordering</span>
+  </div>
+  <div class="cf-divider"></div>
+  <div class="cf-field">
+    <label class="cf-label" for="cfg-safety">Safety Buffer (days)</label>
+    <input class="cf-input" type="number" id="cfg-safety" min="3" max="7" value="3" oninput="applyConfig()">
+    <span class="cf-sub">Extra days of stock held as insurance — can be raised to 7, floor is 3</span>
+  </div>
+  <div class="cf-divider"></div>
+  <div class="cf-field" id="cfg-window-field">
+    <label class="cf-label">Delivery Window</label>
+    <span class="cf-readonly" id="cfg-window">—</span>
+    <span class="cf-sub" id="cfg-window-note">Days until your next scheduled delivery</span>
+  </div>
+  <button class="cf-reset" onclick="resetConfig()">Reset to defaults</button>
+</div>
 
 <main>
 
   <!-- CLIENT VIEW -->
   <div id="client-view">
+    <div class="page-header">
+      <h1>PAR Ordering</h1>
+      <p>Based on your order history, PAR (Periodic Automatic Replenishment) calculates exactly what to order for your next delivery — factoring in how fast you go through each product, when your delivery arrives, and a safety buffer so you never run out unexpectedly.</p>
+    </div>
     <div id="order-window" class="order-window"></div>
     <div class="card">
       <div class="card-header">
@@ -308,7 +454,7 @@
         <span class="card-hint">On-hand is predicted from your order history. Correct it below if needed.</span>
       </div>
       <table>
-        <thead>
+        <thead id="par-thead">
           <tr>
             <th>Item</th>
             <th>Avg Daily Use</th>
@@ -331,7 +477,14 @@
     <div class="card">
       <div class="card-header">
         <span class="card-title" id="atomic-card-title">All Accounts</span>
-        <span class="card-hint" id="atomic-card-hint">Sorted by predicted order volume this week</span>
+        <div style="display:flex;align-items:center;gap:16px">
+          <div class="account-tabs" id="account-type-tabs" style="display:none">
+            <button class="account-tab active" data-filter="group" onclick="filterAccountType('group', this)">Groups</button>
+            <button class="account-tab" data-filter="independent" onclick="filterAccountType('independent', this)">Independent</button>
+            <button class="account-tab" data-filter="needs-review" onclick="filterAccountType('needs-review', this)">Needs Review</button>
+          </div>
+          <span class="card-hint" id="atomic-card-hint">Sorted by predicted order volume this week</span>
+        </div>
       </div>
       <table>
         <thead><tr id="atomic-thead"></tr></thead>
@@ -346,21 +499,13 @@
     <div class="card">
       <div class="card-header">
         <span class="card-title">All Wholesale Accounts</span>
-        <span class="card-hint">Sorted by predicted order volume this week</span>
+        <div style="display:flex;align-items:center;gap:16px">
+          <input class="admin-search" id="admin-search" type="text" placeholder="Search account…" oninput="filterAdminRows(this.value)">
+          <span class="card-hint">Sorted by predicted order volume this week</span>
+        </div>
       </div>
       <table>
-        <thead>
-          <tr>
-            <th>Account</th>
-            <th>Delivery Day</th>
-            <th>Last Order</th>
-            <th>Cutoff</th>
-            <th>Predicted Vol. (lbs)</th>
-            <th>YoY Trend</th>
-            <th>3-Wk Trend</th>
-            <th>Status</th>
-          </tr>
-        </thead>
+        <thead><tr id="admin-thead"></tr></thead>
         <tbody id="admin-tbody"></tbody>
       </table>
     </div>
@@ -369,6 +514,14 @@
 </main>
 
 <script>
+// ── CONFIG OVERRIDES (session-level, do not persist) ──────────────────────────
+const CONFIG = { daysOpen: null, safetyDays: null };
+const DATA_FLOORS = { safetyDays: 3 };
+let summaryDismissed = false;
+
+function daysOpenOf(loc)  { return CONFIG.daysOpen   !== null ? CONFIG.daysOpen   : loc.daysOpen; }
+function safetyOf(loc)    { return CONFIG.safetyDays !== null ? CONFIG.safetyDays : loc.safetyDays; }
+
 const TODAY = new Date();
 
 // ------------------------------------------------------------------
@@ -378,71 +531,73 @@ const TODAY = new Date();
 // Cafe Selah avgDaily from 90-day Shopify history (Feb 6–May 7 2026).
 // Sodexo entries are demo estimates. Last updated: 2026-05-08.
 // ------------------------------------------------------------------
-const COMPANIES = [
-  {
-    id: 0,
-    name: 'Cafe Selah',
-    locations: [
-      {
-        id: 0,
-        name: 'Cafe Selah',
-        deliveryDay: 'wednesday',
-        daysOpen: 6,
-        safetyDays: 3,
-        items: [
-          { name: 'House Blend',      sku: 'HSE501',         usageUnit: 'lbs',     orderUnit: 'bag',  unitsPerOrder: 5,  avgDaily: 1.11, yoy: 0.03, w3: 0.02, lastOrder: new Date(2026,4,4),  lastOnHand: 20.0 },
-          { name: 'Black Velvet',     sku: 'BV501',          usageUnit: 'lbs',     orderUnit: 'bag',  unitsPerOrder: 5,  avgDaily: 0.67, yoy: 0.05, w3: 0.03, lastOrder: new Date(2026,4,4),  lastOnHand: 10.0 },
-          { name: 'Premium Matcha',   sku: 'SMITH-WS-PMTCH', usageUnit: 'tins',    orderUnit: 'case', unitsPerOrder: 12, avgDaily: 0.80, yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,4,4),  lastOnHand: 24.0 },
-          { name: 'Chai Concentrate', sku: 'MF-CHAI',        usageUnit: 'cartons', orderUnit: 'case', unitsPerOrder: 6,  avgDaily: 0.20, yoy: 0.04, w3: 0.02, lastOrder: new Date(2026,3,28), lastOnHand: 6.0  },
-          { name: 'Cold Brew Cans',   sku: 'CANS01',         usageUnit: 'cans',    orderUnit: 'case', unitsPerOrder: 12, avgDaily: 1.07, yoy: 0.08, w3: 0.05, lastOrder: new Date(2026,3,27), lastOnHand: 36.0 },
-          { name: 'Nitro Cans',       sku: 'CANS02',         usageUnit: 'cans',    orderUnit: 'case', unitsPerOrder: 12, avgDaily: 0.40, yoy: 0.06, w3: 0.04, lastOrder: new Date(2026,3,27), lastOnHand: 12.0 },
-        ]
-      }
-    ]
-  },
-  {
-    id: 1,
-    name: 'Sodexo',
-    locations: [
-      {
-        id: 0,
-        name: 'Endicott College',
-        deliveryDay: 'tuesday',
-        daysOpen: 5,
-        safetyDays: 2,
-        items: [
-          { name: 'House Blend',     sku: 'HSE501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 5.0,  yoy: 0.04, w3: 0.02, lastOrder: new Date(2026,4,5), lastOnHand: 50.0 },
-          { name: 'Daydream Decaf',  sku: 'DCF501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 2.0,  yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,4,5), lastOnHand: 20.0 },
-          { name: 'Cold Brew Conc.', sku: 'CONC-BIB1', usageUnit: 'boxes', orderUnit: 'box', unitsPerOrder: 1, avgDaily: 0.30, yoy: 0.10, w3: 0.05, lastOrder: new Date(2026,4,5), lastOnHand: 3.0  },
-        ]
-      },
-      {
-        id: 1,
-        name: 'Gordon College',
-        deliveryDay: 'thursday',
-        daysOpen: 5,
-        safetyDays: 2,
-        items: [
-          { name: 'House Blend',     sku: 'HSE501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 3.5,  yoy: 0.03, w3: 0.01, lastOrder: new Date(2026,4,1), lastOnHand: 35.0 },
-          { name: 'Daydream Decaf',  sku: 'DCF501',    usageUnit: 'lbs',   orderUnit: 'bag', unitsPerOrder: 5, avgDaily: 1.5,  yoy: 0.02, w3: 0.01, lastOrder: new Date(2026,4,1), lastOnHand: 15.0 },
-          { name: 'Cold Brew Conc.', sku: 'CONC-BIB1', usageUnit: 'boxes', orderUnit: 'box', unitsPerOrder: 1, avgDaily: 0.20, yoy: 0.08, w3: 0.04, lastOrder: new Date(2026,4,1), lastOnHand: 2.0  },
-        ]
-      }
-    ]
-  },
-  {
-    id: 2,
-    name: 'Atomic Coffee Roasters (Internal)',
-    isInternal: true,
-    locations: []
-  }
-];
+// Populated by loadData() below.
+let COMPANIES = [];
 
 let currentCompanyId = 0;
 let currentLocationId = 0;
 
 // Keyed by "companyId-locationId-itemIdx"
 const edited = {};
+
+const sortState    = { col: 'totalLbs', dir: -1 };
+const parSortState = { col: null, dir: -1 };
+let parRowOrder    = [];   // locked row order while editing on-hand
+let isEditingOnHand = false;
+
+function thSort(label, col) {
+  const active = sortState.col === col;
+  const ind = active ? (sortState.dir === 1 ? '↑' : '↓') : '↕';
+  return `<th class="sortable${active ? ' sort-active' : ''}" onclick="sortTable('${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
+}
+
+function colVal(row, col) {
+  const S = { 'Overdue': 0, 'Cutoff Soon': 1, 'On Track': 2 };
+  switch (col) {
+    case 'totalLbs':    return row.totalLbs;
+    case 'yoy':         return row.avgYoy;
+    case 'w3':          return row.avgW3;
+    case 'lastOrder':   return row.lastOrder ? +row.lastOrder : 0;
+    case 'cutoff':      return row.cutoff ? +row.cutoff : 0;
+    case 'status':      return S[row.status ?? row.worstStatus] ?? 3;
+    case 'name':        return ((row.company ? row.company.name : '') || (row.loc ? row.loc.name : '') || '').toLowerCase();
+    case 'deliveryDay': {
+      const DAY_NUM = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
+      const todayDow = TODAY.getDay();
+      const offset = d => (( DAY_NUM[d.toLowerCase()] ?? 0) - todayDow + 7) % 7;
+      if (row.loc) return offset(row.loc.deliveryDay);
+      if (row.company) return Math.min(...row.company.locations.map(l => offset(l.deliveryDay)));
+      return offset((row.deliveryDays || '').split(',')[0].trim());
+    }
+    default:            return 0;
+  }
+}
+
+function applySortRows(rows) {
+  return [...rows].sort((a, b) => {
+    const av = colVal(a, sortState.col), bv = colVal(b, sortState.col);
+    if (typeof av === 'string') return sortState.dir * av.localeCompare(bv);
+    return sortState.dir * (av - bv);
+  });
+}
+
+function sortTable(col) {
+  sortState.dir = sortState.col === col ? -sortState.dir : (col === 'deliveryDay' ? 1 : -1);
+  sortState.col = col;
+  document.getElementById('atomic-card-hint').textContent = '';
+  if (!document.getElementById('atomic-view').classList.contains('hidden')) {
+    if (document.getElementById('btn-by-account').classList.contains('active')) renderAtomicByAccount();
+    else renderAtomicByLocation();
+  } else if (!document.getElementById('admin-view').classList.contains('hidden')) {
+    renderAdmin(currentCompanyId);
+  }
+}
+
+function sortParTable(col) {
+  parSortState.dir = parSortState.col === col ? -parSortState.dir : -1;
+  parSortState.col = col;
+  renderClient(currentCompanyId, currentLocationId);
+}
 
 // ------------------------------------------------------------------
 // DELIVERY / CUTOFF LOGIC
@@ -482,14 +637,32 @@ function cutoffFor(deliveryDay, deliveryDate) {
 // CALCULATIONS
 // ------------------------------------------------------------------
 function effectiveDaily(item) {
-  const growth = 0.7 * item.yoy + 0.3 * item.w3;
+  const growth = 0.35 * item.yoy + 0.35 * (item.w7 || 0) + 0.30 * item.w3;
   return item.avgDaily * (1 + growth);
 }
 
 function predictOnHand(item) {
+  if (!item.lastOrder) return 0;
   const msPerDay = 1000 * 60 * 60 * 24;
   const daysSince = Math.floor((TODAY - item.lastOrder) / msPerDay);
   return Math.max(0, item.lastOnHand - effectiveDaily(item) * daysSince);
+}
+
+function onHandStep(item) {
+  if (item.sku.startsWith('DCF')) return 2;
+  return item.unitsPerOrder || 1;
+}
+
+function onHandStepDown(item) {
+  // Coffee (lbs): step down = same as step up (bag size)
+  if (item.usageUnit === 'lbs') return onHandStep(item);
+  // Everything else (cans, cartons, tins, boxes, kegs): step down = 1 each
+  return 1;
+}
+
+function defaultOnHand(item) {
+  const step = onHandStep(item);
+  return Math.floor(predictOnHand(item) / step) * step;
 }
 
 function calcPAR(item, daysUntilDelivery, daysOpen, safetyDays) {
@@ -509,11 +682,16 @@ function fmt(d) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 function fmtShort(d) {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+}
+function fmtLastOrder(d, daysSince) {
+  if (daysSince >= 30) return `<span style="color:#dc2626;font-weight:600">1m+</span>`;
+  return `${fmtShort(d)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span>`;
 }
 function hoursUntil(d) { return (d - TODAY) / (1000 * 60 * 60); }
 function trendClass(pct) { return pct > 0.02 ? 'up' : pct < -0.02 ? 'down' : 'flat'; }
 function trendArrow(pct) { return pct > 0.02 ? '▲' : pct < -0.02 ? '▼' : '—'; }
+function fmtLbs(lbs) { return lbs === 0 ? '<span style="color:rgba(0,0,0,0.3)">—</span>' : lbs.toFixed(0) + ' lbs'; }
 
 // ------------------------------------------------------------------
 // RENDER: CLIENT VIEW
@@ -535,43 +713,71 @@ function renderClient(companyId, locationId) {
     badgeText = `${Math.round(hours / 24)} days to order`;
   }
 
+  updateConfigWindow(daysUntil);
+
   const win = document.getElementById('order-window');
   win.className = `order-window${urgency === 'urgent' ? ' urgent' : urgency === 'warn' ? ' warn' : ''}`;
   win.innerHTML = `
-    <div class="ow-block">
+    <div class="ow-block" data-tip="Your next scheduled delivery date, based on your delivery day and today's date.">
       <span class="ow-label">Next Delivery</span>
       <span class="ow-value">${fmt(delivery)}</span>
       <span class="ow-sub">${daysUntil} day${daysUntil !== 1 ? 's' : ''} from today</span>
     </div>
     <div class="ow-divider"></div>
-    <div class="ow-block">
+    <div class="ow-block" data-tip="The deadline to place your order for this delivery. Orders received after this time are pushed to the following week.">
       <span class="ow-label">Order Cutoff</span>
       <span class="ow-value">${fmt(cutoff)}</span>
       <span class="ow-sub">by 11:59 PM</span>
     </div>
     <div class="ow-divider"></div>
-    <div class="ow-block">
+    <div class="ow-block" data-tip="How much time you have left to place your order before the cutoff deadline.">
       <span class="ow-label">Window Status</span>
       <span class="status-badge ${badgeClass}">${badgeText}</span>
     </div>
   `;
 
+  // Build sortable PAR table headers
+  const parCols = [
+    { key: 'name',   label: 'Item',             tip: null },
+    { key: 'daily',  label: 'Avg Daily Use',     tip: 'How many bags (or cans) your location goes through on an average day, based on your order history.' },
+    { key: 'safety', label: 'Safety Stock',      tip: 'Extra inventory held as a buffer — so you never run out before your next delivery arrives.' },
+    { key: 'par',    label: 'PAR Target',        tip: 'The total stock you should have on hand when placing this order — enough to cover until your next delivery plus the safety buffer.' },
+    { key: 'onhand', label: 'Current On Hand',   tip: 'How much stock you have right now. We estimate this from your order history — correct it if you know the real number.' },
+    { key: 'order',  label: 'Order',             tip: 'Recommended bags or cases to order to hit your PAR target.' },
+    { key: 'trend',  label: 'Trend',             tip: 'Whether your usage is trending up or down compared to the same period last year.' },
+  ];
+  document.getElementById('par-thead').innerHTML = '<tr>' + parCols.map(({ key, label, tip }) => {
+    const isActive = parSortState.col === key;
+    const arrow = isActive ? (parSortState.dir === -1 ? ' ↓' : ' ↑') : '';
+    const tipAttr = tip ? ` data-tip="${tip}"` : '';
+    return `<th style="cursor:pointer;user-select:none${isActive ? ';color:#1a1a1a' : ''}" onclick="sortParTable('${key}')"${tipAttr}>${label}${arrow}</th>`;
+  }).join('') + '</tr>';
+
   const tbody = document.getElementById('par-tbody');
   tbody.innerHTML = '';
 
-  loc.items.forEach((item, idx) => {
-    const key = `${companyId}-${locationId}-${idx}`;
+  const activeItems = loc.items.filter(item =>
+    item.usageUnit !== 'units' &&
+    (item.avgDaily > 0 || item.qty60 > 0 || item.qw3l > 0 || item.qw3p > 0)
+  );
+  const canItems   = activeItems.filter(i => i.usageUnit === 'cans' && i.sku !== 'CANS02');
+  const otherItems = activeItems.filter(i => i.usageUnit !== 'cans');
+
+  // Helper: render one standard item row
+  const renderItemRow = (item, extraClass = '') => {
+    const key = `${companyId}-${locationId}-${item.sku}`;
     const isEdited = edited[key] !== undefined;
-    const onHand = isEdited ? edited[key] : predictOnHand(item);
+    const onHand = isEdited ? edited[key] : defaultOnHand(item);
     const daily = effectiveDaily(item);
-    const safetyStock = daily * loc.safetyDays;
-    const parTarget = calcPAR(item, daysUntil, loc.daysOpen, loc.safetyDays);
-    const orders = recOrders(item, daysUntil, onHand, loc.daysOpen, loc.safetyDays);
+    const safetyStock = daily * safetyOf(loc);
+    const parTarget = calcPAR(item, daysUntil, daysOpenOf(loc), safetyOf(loc));
+    const orders = recOrders(item, daysUntil, onHand, daysOpenOf(loc), safetyOf(loc));
     const weightedGrowth = 0.7 * item.yoy + 0.3 * item.w3;
     const orderLabel = orders !== 1 ? item.orderUnit + 's' : item.orderUnit;
     const showSub = orders > 0 && item.unitsPerOrder > 1;
-
     const tr = document.createElement('tr');
+    if (extraClass) tr.className = extraClass;
+    tr.dataset.rowKey = item.sku;
     tr.innerHTML = `
       <td>
         <div class="item-name">${item.name}</div>
@@ -582,12 +788,14 @@ function renderClient(companyId, locationId) {
       <td><strong>${parTarget.toFixed(1)} ${item.usageUnit}</strong></td>
       <td>
         <div class="onhand-wrap">
+          <button class="onhand-btn" onclick="adjustOnHand('${key}', -1, ${onHandStepDown(item)}, this)">−</button>
           <input
             class="onhand-input${isEdited ? ' is-edited' : ''}"
-            type="number" min="0" step="0.5"
+            type="number" min="0" step="any"
             value="${onHand.toFixed(1)}"
             onchange="editOnHand('${key}', this)"
           />
+          <button class="onhand-btn" onclick="adjustOnHand('${key}', 1, ${onHandStep(item)}, this)">+</button>
           <span class="onhand-unit">${item.usageUnit}</span>
           <span class="data-tag ${isEdited ? 'tag-corrected' : 'tag-predicted'}">${isEdited ? 'corrected' : 'predicted'}</span>
         </div>
@@ -600,8 +808,120 @@ function renderClient(companyId, locationId) {
         <span class="trend-pill ${trendClass(weightedGrowth)}">${trendArrow(weightedGrowth)} ${(weightedGrowth * 100).toFixed(1)}%</span>
       </td>
     `;
-    tbody.appendChild(tr);
+    return tr;
+  };
+
+  // Build one unified sortable list: cans aggregate row + individual items
+  const allRows = [];
+
+  if (canItems.length > 0) {
+    const canKey = `${companyId}-${locationId}-CANS`;
+    const predictedOnHandTotal = canItems.reduce((s, i) => s + defaultOnHand(i), 0);
+    const isEdited = edited[canKey] !== undefined;
+    const onHandTotal = isEdited ? edited[canKey] : Math.floor(predictedOnHandTotal / 12) * 12;
+    const totalDaily  = canItems.reduce((s, i) => s + effectiveDaily(i), 0);
+    const totalSafety = canItems.reduce((s, i) => s + effectiveDaily(i) * safetyOf(loc), 0);
+    const totalPAR    = canItems.reduce((s, i) => s + calcPAR(i, daysUntil, daysOpenOf(loc), safetyOf(loc)), 0);
+    const avgGrowth   = canItems.reduce((s, i) => s + (0.7 * i.yoy + 0.3 * i.w3), 0) / canItems.length;
+    const totalPredicted = predictedOnHandTotal || 1;
+    const totalCasesRec  = canItems.reduce((s, item) => {
+      const share = onHandTotal * (predictOnHand(item) / totalPredicted);
+      return s + recOrders(item, daysUntil, share, daysOpenOf(loc), safetyOf(loc));
+    }, 0);
+    const variantNames = canItems.map(i => i.name.replace(' Cold Brew Cans','').replace(' Cans','')).join(', ');
+
+    allRows.push({
+      isCans: true,
+      name: 'cold brew cans',
+      daily: totalDaily, safety: totalSafety, par: totalPAR,
+      onhand: onHandTotal, order: totalCasesRec, trend: avgGrowth,
+      // render data
+      canKey, isEdited, onHandTotal, totalDaily, totalSafety, totalPAR,
+      avgGrowth, totalCasesRec, variantNames,
+    });
+  }
+
+  otherItems.forEach(item => {
+    const daily  = effectiveDaily(item);
+    const onHand = defaultOnHand(item);
+    const orders = recOrders(item, daysUntil, onHand, daysOpenOf(loc), safetyOf(loc));
+    allRows.push({
+      isCans: false, item,
+      name:   item.name.toLowerCase(),
+      daily,
+      safety: daily * safetyOf(loc),
+      par:    calcPAR(item, daysUntil, daysOpenOf(loc), safetyOf(loc)),
+      onhand: onHand,
+      order:  orders,
+      trend:  0.7 * item.yoy + 0.3 * item.w3,
+    });
   });
+
+  if (isEditingOnHand && parRowOrder.length > 0) {
+    allRows.sort((a, b) => {
+      const aKey = a.isCans ? 'CANS' : a.item.sku;
+      const bKey = b.isCans ? 'CANS' : b.item.sku;
+      const ai = parRowOrder.indexOf(aKey), bi = parRowOrder.indexOf(bKey);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+  } else {
+    const sortCol = parSortState.col || 'order';
+    const sortDir = parSortState.col ? parSortState.dir : -1;
+    allRows.sort((a, b) => {
+      const av = a[sortCol], bv = b[sortCol];
+      if (typeof av === 'string') return sortDir * av.localeCompare(bv);
+      return sortDir * (av - bv);
+    });
+  }
+
+  allRows.forEach(row => {
+    if (row.isCans) {
+      const { canKey, isEdited, onHandTotal, totalDaily, totalSafety, totalPAR,
+              avgGrowth, totalCasesRec, variantNames } = row;
+      const canTr = document.createElement('tr');
+      canTr.className = 'can-group-header';
+      canTr.dataset.rowKey = 'CANS';
+      canTr.innerHTML = `
+        <td>
+          <div class="item-name">Cold Brew Cans</div>
+          <div class="item-sku" style="white-space:normal;line-height:1.3">${variantNames}</div>
+        </td>
+        <td>${totalDaily.toFixed(1)} cans/day</td>
+        <td>${totalSafety.toFixed(1)} cans</td>
+        <td><strong>${totalPAR.toFixed(1)} cans</strong></td>
+        <td>
+          <div class="onhand-wrap">
+            <button class="onhand-btn" onclick="adjustOnHand('${canKey}', -1, 1, this)">−</button>
+            <input
+              class="onhand-input${isEdited ? ' is-edited' : ''}"
+              type="number" min="0" step="any"
+              value="${onHandTotal.toFixed(0)}"
+              onchange="editOnHand('${canKey}', this)"
+            />
+            <button class="onhand-btn" onclick="adjustOnHand('${canKey}', 1, 12, this)">+</button>
+            <span class="onhand-unit">cans</span>
+            <span class="data-tag ${isEdited ? 'tag-corrected' : 'tag-predicted'}">${isEdited ? 'corrected' : 'predicted'}</span>
+          </div>
+        </td>
+        <td>
+          <div class="rec-bags ${totalCasesRec === 0 ? 'none' : totalCasesRec <= 3 ? 'low' : 'high'}">${totalCasesRec} ${totalCasesRec !== 1 ? 'cases' : 'case'}</div>
+          <div class="rec-lbs">${totalCasesRec === 0 ? 'No order needed' : (totalCasesRec * 12).toFixed(0) + ' cans'}</div>
+        </td>
+        <td><span class="trend-pill ${trendClass(avgGrowth)}">${trendArrow(avgGrowth)} ${(avgGrowth * 100).toFixed(1)}%</span></td>
+      `;
+      tbody.appendChild(canTr);
+    } else {
+      tbody.appendChild(renderItemRow(row.item));
+    }
+  });
+}
+
+function adjustOnHand(key, dir, step, btn) {
+  const input = btn.closest('.onhand-wrap').querySelector('input.onhand-input');
+  const current = parseFloat(input.value) || 0;
+  const newVal = Math.max(0, current + dir * step);
+  input.value = newVal;
+  editOnHand(key, input);
 }
 
 function editOnHand(key, input) {
@@ -609,7 +929,10 @@ function editOnHand(key, input) {
   if (!isNaN(val) && val >= 0) {
     edited[key] = val;
     input.classList.add('is-edited');
+    parRowOrder = [...document.querySelectorAll('#par-tbody tr[data-row-key]')].map(r => r.dataset.rowKey);
+    isEditingOnHand = true;
     renderClient(currentCompanyId, currentLocationId);
+    isEditingOnHand = false;
   }
 }
 
@@ -623,8 +946,8 @@ function renderAdmin(companyId) {
   company.locations.forEach(loc => {
     const { delivery } = getDeliveryWindow(loc.deliveryDay);
     const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
-    loc.items.forEach(item => {
-      const orders = recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays);
+    loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0 || i.qw3l > 0 || i.qw3p > 0)).forEach(item => {
+      const orders = recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc));
       if (item.usageUnit === 'lbs') totalPredLbs += orders * item.unitsPerOrder;
       yoySum += item.yoy;
       itemCount++;
@@ -652,22 +975,37 @@ function renderAdmin(companyId) {
     </div>
   `;
 
+  document.getElementById('admin-thead').innerHTML =
+    thSort('Account', 'name') +
+    thSort('Delivery Day', 'deliveryDay') +
+    thSort('Last Order', 'lastOrder') +
+    thSort('Cutoff', 'cutoff') +
+    thSort('Predicted Vol. (lbs)', 'totalLbs') +
+    thSort('YoY Trend', 'yoy') +
+    thSort('3-Wk Trend', 'w3') +
+    thSort('Status', 'status');
+
+  const searchEl = document.getElementById('admin-search');
+  if (searchEl) searchEl.value = '';
+
   const tbody = document.getElementById('admin-tbody');
   tbody.innerHTML = '';
 
-  const rows = company.locations.map(loc => {
+  const rows = applySortRows(company.locations.map(loc => {
     const { delivery, cutoff } = getDeliveryWindow(loc.deliveryDay);
     const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
     const hours = hoursUntil(cutoff);
     const totalLbs = loc.items
       .filter(i => i.usageUnit === 'lbs')
-      .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays) * item.unitsPerOrder, 0);
-    const avgYoy = loc.items.reduce((s, i) => s + i.yoy, 0) / loc.items.length;
-    const avgW3  = loc.items.reduce((s, i) => s + i.w3,  0) / loc.items.length;
-    const lastOrder = loc.items[0].lastOrder;
-    const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
+      .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
+    const activeItems = loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0 || i.qw3l > 0 || i.qw3p > 0));
+    const avgYoy = activeItems.length ? activeItems.reduce((s, i) => s + i.yoy, 0) / activeItems.length : 0;
+    const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
+    const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
+    const lastOrder = validOrders.length ? validOrders.reduce((a, b) => b > a ? b : a) : null;
+    const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : 999;
     return { loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince };
-  }).sort((a, b) => b.totalLbs - a.totalLbs);
+  }));
 
   rows.forEach(({ loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince }) => {
     let status, dotClass;
@@ -676,17 +1014,25 @@ function renderAdmin(companyId) {
     else                               { status = 'On Track';    dotClass = 'dot-green'; }
 
     const tr = document.createElement('tr');
+    tr.dataset.name = loc.name.toLowerCase();
     tr.innerHTML = `
       <td><strong>${loc.name}</strong></td>
       <td style="text-transform:capitalize">${loc.deliveryDay}</td>
-      <td>${fmtShort(lastOrder)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span></td>
+      <td>${fmtLastOrder(lastOrder, daysSince)}</td>
       <td>${fmt(cutoff)}, 11:59 PM</td>
-      <td><strong>${totalLbs.toFixed(0)} lbs</strong></td>
+      <td><strong>${fmtLbs(totalLbs)}</strong></td>
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy * 100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3 * 100).toFixed(1)}%</span></td>
       <td><span class="status-dot ${dotClass}"></span>${status}</td>
     `;
     tbody.appendChild(tr);
+  });
+}
+
+function filterAdminRows(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('#admin-tbody tr').forEach(tr => {
+    tr.style.display = (!q || tr.dataset.name.includes(q)) ? '' : 'none';
   });
 }
 
@@ -705,11 +1051,13 @@ function locationSummary(loc) {
   const hours = hoursUntil(cutoff);
   const totalLbs = loc.items
     .filter(i => i.usageUnit === 'lbs')
-    .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays) * item.unitsPerOrder, 0);
-  const avgYoy = loc.items.reduce((s, i) => s + i.yoy, 0) / loc.items.length;
-  const avgW3  = loc.items.reduce((s, i) => s + i.w3,  0) / loc.items.length;
-  const lastOrder = loc.items.reduce((latest, i) => i.lastOrder > latest ? i.lastOrder : latest, loc.items[0].lastOrder);
-  const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
+    .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
+  const activeItems = loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0 || i.qw3l > 0 || i.qw3p > 0));
+  const avgYoy = activeItems.length ? activeItems.reduce((s, i) => s + i.yoy, 0) / activeItems.length : 0;
+  const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
+  const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
+  const lastOrder = validOrders.length ? validOrders.reduce((a, b) => b > a ? b : a) : null;
+  const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : 999;
   let status, dotClass;
   if (daysSince > 21)                { status = 'Overdue';     dotClass = 'dot-red'; }
   else if (hours <= 24 && hours > 0) { status = 'Cutoff Soon'; dotClass = 'dot-amber'; }
@@ -719,82 +1067,174 @@ function locationSummary(loc) {
 
 function renderAtomicByLocation() {
   document.getElementById('atomic-card-title').textContent = 'All Locations';
-  document.getElementById('atomic-thead').innerHTML = `
-    <th>Account</th><th>Location</th><th>Delivery Day</th>
-    <th>Last Order</th><th>Predicted Vol. (lbs)</th>
-    <th>YoY Trend</th><th>3-Wk Trend</th><th>Status</th>`;
+  document.getElementById('atomic-thead').innerHTML =
+    thSort('Account', 'name') +
+    `<th>Location</th>` +
+    thSort('Delivery Day', 'deliveryDay') +
+    thSort('Last Order', 'lastOrder') +
+    thSort('Predicted Vol. (lbs)', 'totalLbs') +
+    thSort('YoY Trend', 'yoy') +
+    thSort('3-Wk Trend', 'w3') +
+    thSort('Status', 'status');
 
-  const rows = allLocations().map(({ company, loc }) => {
+  const rows = applySortRows(allLocations().map(({ company, loc }) => {
     const s = locationSummary(loc);
     return { company, loc, ...s };
-  }).sort((a, b) => b.totalLbs - a.totalLbs);
+  }));
 
-  document.getElementById('atomic-tbody').innerHTML = rows.map(({ company, loc, cutoff, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => `
-    <tr>
+  document.getElementById('atomic-tbody').innerHTML = rows.map(({ company, loc, cutoff, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => {
+    const atRisk = daysSince >= 30;
+    return `<tr${atRisk ? ' class="row-at-risk"' : ''}>
       <td style="color:rgba(0,0,0,0.45);font-size:13px">${company.name}</td>
       <td><strong>${loc.name}</strong></td>
       <td style="text-transform:capitalize">${loc.deliveryDay}</td>
-      <td>${fmtShort(lastOrder)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span></td>
-      <td><strong>${totalLbs.toFixed(0)} lbs</strong></td>
+      <td>${fmtLastOrder(lastOrder, daysSince)}</td>
+      <td><strong>${fmtLbs(totalLbs)}</strong></td>
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
-      <td><span class="status-dot ${dotClass}"></span>${status}</td>
-    </tr>`).join('');
+      <td><span class="status-dot ${atRisk ? 'dot-red' : dotClass}"></span>${atRisk ? 'At Risk' : status}</td>
+    </tr>`;
+  }).join('');
 }
 
 function renderAtomicByAccount() {
   document.getElementById('atomic-card-title').textContent = 'All Accounts';
-  document.getElementById('atomic-thead').innerHTML = `
-    <th>Account</th><th>Delivery Day</th>
-    <th>Last Order</th><th>Predicted Vol. (lbs)</th>
-    <th>YoY Trend</th><th>3-Wk Trend</th><th>Status</th>`;
+  document.getElementById('atomic-thead').innerHTML =
+    thSort('Account', 'name') +
+    thSort('Delivery Day', 'deliveryDay') +
+    thSort('Last Order', 'lastOrder') +
+    thSort('Predicted Vol. (lbs)', 'totalLbs') +
+    thSort('YoY Trend', 'yoy') +
+    thSort('3-Wk Trend', 'w3') +
+    thSort('Status', 'status');
 
   const companies = COMPANIES.filter(c => !c.isInternal);
-  const rows = companies.map(company => {
+  const rows = applySortRows(companies.map(company => {
     const summaries = company.locations.map(loc => ({ loc, ...locationSummary(loc) }));
     const totalLbs = summaries.reduce((s, r) => s + r.totalLbs, 0);
     const avgYoy   = summaries.reduce((s, r) => s + r.avgYoy, 0) / summaries.length;
     const avgW3    = summaries.reduce((s, r) => s + r.avgW3,  0) / summaries.length;
-    const lastOrder = summaries.reduce((latest, r) => r.lastOrder > latest ? r.lastOrder : latest, summaries[0].lastOrder);
-    const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
+    const validLastOrders = summaries.map(r => r.lastOrder).filter(Boolean);
+    const lastOrder = validLastOrders.length ? validLastOrders.reduce((a, b) => b > a ? b : a) : null;
+    const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : 999;
     const worstStatus = summaries.find(r => r.status === 'Overdue') ? 'Overdue'
       : summaries.find(r => r.status === 'Cutoff Soon') ? 'Cutoff Soon' : 'On Track';
     const dotClass = worstStatus === 'Overdue' ? 'dot-red' : worstStatus === 'Cutoff Soon' ? 'dot-amber' : 'dot-green';
     return { company, summaries, totalLbs, avgYoy, avgW3, lastOrder, daysSince, worstStatus, dotClass };
-  }).sort((a, b) => b.totalLbs - a.totalLbs);
+  }));
 
-  const html = rows.flatMap(({ company, summaries, totalLbs, avgYoy, avgW3, lastOrder, daysSince, worstStatus, dotClass }) => {
-    const isMulti = company.locations.length > 1;
-    const deliveryDays = [...new Set(company.locations.map(l => l.deliveryDay))]
+  // Build a parent+children block for one subset of a company's locations.
+  // blockSums: array of locationSummary objects for this block
+  // atype: 'group' | 'independent' | 'needs-review'
+  // blockCid: unique ID for this block (used by toggleCompany)
+  // label: suffix shown after company name (e.g. "2 at-risk locations")
+  const buildBlock = (company, blockSums, atype, blockCid, label) => {
+    const bIsAtRisk = atype === 'needs-review';
+    const showExpandable = blockSums.length > 1;
+    const bLastOrders = blockSums.map(s => s.lastOrder).filter(Boolean);
+    const bLastOrder  = bLastOrders.length ? bLastOrders.reduce((a, b) => b > a ? b : a) : null;
+    const bDaysSince  = bLastOrder ? Math.floor((TODAY - bLastOrder) / 86400000) : 999;
+    const bTotalLbs   = blockSums.reduce((s, r) => s + r.totalLbs, 0);
+    const bAvgYoy     = blockSums.reduce((s, r) => s + r.avgYoy, 0) / blockSums.length;
+    const bAvgW3      = blockSums.reduce((s, r) => s + r.avgW3,  0) / blockSums.length;
+    const bWorst = blockSums.find(r => r.status === 'Overdue') ? 'Overdue'
+      : blockSums.find(r => r.status === 'Cutoff Soon') ? 'Cutoff Soon' : 'On Track';
+    const bDot    = bIsAtRisk ? 'dot-red' : (bWorst === 'Overdue' ? 'dot-red' : bWorst === 'Cutoff Soon' ? 'dot-amber' : 'dot-green');
+    const statusText = bIsAtRisk ? 'At Risk' : bWorst;
+    const atRiskCls  = bIsAtRisk ? ' row-at-risk' : '';
+    const chevron    = showExpandable ? `<span class="collapse-chevron">▾</span>` : '';
+    const delivDays  = [...new Set(blockSums.map(s => s.loc.deliveryDay))]
       .map(d => d[0].toUpperCase() + d.slice(1, 3)).join(', ');
 
-    // Parent row — always shown
-    const parentRow = `<tr class="row-parent">
-      <td>${company.name}${isMulti ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${company.locations.length} locations</span>` : ''}</td>
-      <td>${deliveryDays}</td>
-      <td>${fmtShort(lastOrder)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span></td>
-      <td><strong>${totalLbs.toFixed(0)} lbs</strong></td>
-      <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
-      <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
-      <td><span class="status-dot ${dotClass}"></span>${worstStatus}</td>
+    const parentRow = `<tr class="row-parent${showExpandable ? ' collapsible collapsed' : ''}${atRiskCls}" data-cid="${blockCid}" data-atype="${atype}" ${showExpandable ? `onclick="toggleCompany(this)"` : ''}>
+      <td>${chevron}${company.name}${label ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${label}</span>` : ''}</td>
+      <td>${delivDays}</td>
+      <td>${fmtLastOrder(bLastOrder, bDaysSince)}</td>
+      <td><strong>${fmtLbs(bTotalLbs)}</strong></td>
+      <td><span class="trend-pill ${trendClass(bAvgYoy)}">${trendArrow(bAvgYoy)} ${(bAvgYoy*100).toFixed(1)}%</span></td>
+      <td><span class="trend-pill ${trendClass(bAvgW3)}">${trendArrow(bAvgW3)} ${(bAvgW3*100).toFixed(1)}%</span></td>
+      <td><span class="status-dot ${bDot}"></span>${statusText}</td>
     </tr>`;
 
-    // Child rows — only for multi-location companies
-    const childRows = isMulti ? summaries.map(({ loc, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => `
-      <tr class="row-child">
-        <td>${loc.name}</td>
-        <td style="text-transform:capitalize">${loc.deliveryDay}</td>
-        <td>${fmtShort(lLast)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${lDays}d ago)</span></td>
-        <td>${lLbs.toFixed(0)} lbs</td>
-        <td><span class="trend-pill ${trendClass(lYoy)}">${trendArrow(lYoy)} ${(lYoy*100).toFixed(1)}%</span></td>
-        <td><span class="trend-pill ${trendClass(lW3)}">${trendArrow(lW3)} ${(lW3*100).toFixed(1)}%</span></td>
-        <td><span class="status-dot ${lDot}"></span>${status}</td>
-      </tr>`).join('') : '';
+    const childRows = showExpandable ? [...blockSums].sort((a, b) => b.totalLbs - a.totalLbs)
+      .map(({ loc, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => {
+        const cAtRisk = lDays >= 30;
+        return `<tr class="row-child${cAtRisk ? ' row-at-risk' : ''}" data-parent-cid="${blockCid}" data-atype="${atype}" style="display:none">
+          <td>${loc.name}</td>
+          <td style="text-transform:capitalize">${loc.deliveryDay}</td>
+          <td>${fmtLastOrder(lLast, lDays)}</td>
+          <td>${fmtLbs(lLbs)}</td>
+          <td><span class="trend-pill ${trendClass(lYoy)}">${trendArrow(lYoy)} ${(lYoy*100).toFixed(1)}%</span></td>
+          <td><span class="trend-pill ${trendClass(lW3)}">${trendArrow(lW3)} ${(lW3*100).toFixed(1)}%</span></td>
+          <td><span class="status-dot ${cAtRisk ? 'dot-red' : lDot}"></span>${cAtRisk ? 'At Risk' : status}</td>
+        </tr>`;
+      }).join('') : '';
 
-    return [parentRow, childRows];
+    return parentRow + childRows;
+  };
+
+  const buildRow = ({ company, summaries }) => {
+    const isMulti  = company.locations.length > 1;
+    const cid      = company.id;
+    const atRiskSums  = summaries.filter(s => s.daysSince >= 30);
+    const healthySums = summaries.filter(s => s.daysSince < 30);
+    const isMixed  = atRiskSums.length > 0 && healthySums.length > 0;
+
+    if (isMixed) {
+      // Healthy locations → Groups tab, at-risk locations → Needs Review tab
+      const nActive = healthySums.length;
+      const nRisk   = atRiskSums.length;
+      const healthyAtype = isMulti ? 'group' : 'independent';
+      const healthyLabel = `${nActive} active location${nActive !== 1 ? 's' : ''}`;
+      const riskLabel    = `${nRisk} at-risk location${nRisk !== 1 ? 's' : ''}`;
+      return buildBlock(company, healthySums, healthyAtype, `${cid}-active`, healthyLabel)
+           + buildBlock(company, atRiskSums,  'needs-review', `${cid}-risk`, riskLabel);
+    }
+
+    if (atRiskSums.length > 0) {
+      // All locations at risk
+      const label = isMulti ? `${atRiskSums.length} locations` : '';
+      return buildBlock(company, atRiskSums, 'needs-review', cid, label);
+    }
+
+    // All locations healthy
+    const atype = isMulti ? 'group' : 'independent';
+    const label = isMulti ? `${healthySums.length} locations` : '';
+    return buildBlock(company, healthySums, atype, cid, label);
+  };
+
+  document.getElementById('atomic-tbody').innerHTML = rows.map(buildRow).join('');
+  document.getElementById('account-type-tabs').style.display = '';
+  const activeTab = document.querySelector('.account-tab.active');
+  filterAccountType(activeTab ? activeTab.dataset.filter : 'group',
+                    activeTab || document.querySelector('.account-tab'));
+}
+
+function filterAccountType(type, btn) {
+  document.querySelectorAll('.account-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#atomic-tbody tr').forEach(row => {
+    const rowType = row.dataset.atype;
+    const matches = rowType === type;
+    if (matches) {
+      if (row.classList.contains('row-child')) {
+        const parent = document.querySelector(`tr.row-parent[data-cid="${row.dataset.parentCid}"]`);
+        row.style.display = (parent && parent.classList.contains('collapsed')) ? 'none' : '';
+      } else {
+        row.style.display = '';
+      }
+    } else {
+      row.style.display = 'none';
+    }
   });
+}
 
-  document.getElementById('atomic-tbody').innerHTML = html.join('');
+function toggleCompany(parentTr) {
+  const cid = parentTr.dataset.cid;
+  const isCollapsed = parentTr.classList.toggle('collapsed');
+  document.querySelectorAll(`tr[data-parent-cid="${cid}"]`).forEach(row => {
+    row.style.display = isCollapsed ? 'none' : '';
+  });
 }
 
 function renderAtomicSummary() {
@@ -803,10 +1243,12 @@ function renderAtomicSummary() {
     const { delivery } = getDeliveryWindow(loc.deliveryDay);
     const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
     return s + loc.items.filter(i => i.usageUnit === 'lbs').reduce((ss, item) =>
-      ss + recOrders(item, daysUntil, predictOnHand(item), loc.daysOpen, loc.safetyDays) * item.unitsPerOrder, 0);
+      ss + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
   }, 0);
-  const allItems = locs.flatMap(({ loc }) => loc.items);
-  const avgYoy = allItems.reduce((s, i) => s + i.yoy, 0) / allItems.length;
+  const beanItems = locs.flatMap(({ loc }) => loc.items.filter(i => i.usageUnit === 'lbs'));
+  const totalW3l   = beanItems.reduce((s, i) => s + (i.qw3l   || 0), 0);
+  const totalLyW3l = beanItems.reduce((s, i) => s + (i.qly_w3l || 0), 0);
+  const portfolioYoy = totalLyW3l > 0 ? (totalW3l - totalLyW3l) / totalLyW3l : 0;
   const companies = COMPANIES.filter(c => !c.isInternal);
 
   document.getElementById('atomic-summary-grid').innerHTML = `
@@ -821,9 +1263,9 @@ function renderAtomicSummary() {
       <div class="stat-sub">Coffee only — all accounts</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Avg YoY Growth</div>
-      <div class="stat-value" style="color:${avgYoy >= 0 ? '#10b981' : '#dc2626'}">${avgYoy >= 0 ? '+' : ''}${(avgYoy*100).toFixed(1)}%</div>
-      <div class="stat-sub">Unweighted avg across all SKUs</div>
+      <div class="stat-label">Whole Bean YoY Growth</div>
+      <div class="stat-value" style="color:${portfolioYoy >= 0 ? '#10b981' : '#dc2626'}">${portfolioYoy >= 0 ? '+' : ''}${(portfolioYoy*100).toFixed(1)}%</div>
+      <div class="stat-sub">3-wk volume vs same period last year</div>
     </div>`;
 }
 
@@ -865,22 +1307,24 @@ function switchCompany(id) {
   atomicToggle.classList.add('hidden');
 
   const companySelect = document.getElementById('company-select');
-  const demoLabel     = document.getElementById('demo-label');
 
   if (company.isInternal) {
     companySelect.classList.remove('hidden');
-    demoLabel.classList.remove('hidden');
     atomicToggle.classList.remove('hidden');
     document.getElementById('atomic-view').classList.remove('hidden');
     document.querySelectorAll('#atomic-toggle .view-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('btn-by-account').classList.add('active');
+    document.getElementById('cfg-window-field').style.display = 'none';
     renderAtomicSummary();
     renderAtomicByAccount();
+    renderSummaryStrip();
     return;
   }
 
+  document.getElementById('summary-strip').classList.add('hidden');
+  document.getElementById('cfg-window-field').style.display = '';
+
   companySelect.classList.add('hidden');
-  demoLabel.classList.add('hidden');
 
   const isMulti = company.locations.length > 1;
   if (isMulti) {
@@ -903,8 +1347,188 @@ function switchLocation(id) {
   renderClient(currentCompanyId, currentLocationId);
 }
 
-// Init — start on Atomic so the account selector is visible for demo navigation
-switchCompany(2);
+// ── DATA LOADING ──────────────────────────────────────────────────────────────
+
+function populateCompanySelect(companies) {
+  const sel = document.getElementById('company-select');
+  sel.innerHTML = companies.map((c, i) =>
+    `<option value="${i}"${c.isInternal ? ' selected' : ''}>${c.isInternal ? '⚡ Atomic (Internal)' : c.name}</option>`
+  ).join('');
+}
+
+function normalizeCompanies(raw) {
+  // Convert lastOrderDate strings → Date objects expected by render functions.
+  return raw.map((c, idx) => ({
+    ...c,
+    id: idx,
+    locations: (c.locations || []).map(loc => ({
+      ...loc,
+      items: (loc.items || []).map(item => ({
+        ...item,
+        lastOrder: item.lastOrderDate ? new Date(item.lastOrderDate) : null,
+      })),
+    })),
+  }));
+}
+
+async function loadData() {
+  try {
+    const resp = await fetch('data.json');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    COMPANIES = normalizeCompanies(json.companies || []);
+
+    // Show data freshness in the announcement bar if available.
+    if (json.generated) {
+      const d = new Date(json.generated);
+      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      document.querySelector('.announcement').textContent =
+        `Atomic Coffee Roasters — Wholesale Partner Portal — Data refreshed ${label}`;
+    }
+  } catch (e) {
+    console.error('Failed to load PAR data:', e.message);
+    document.querySelector('.announcement').textContent =
+      'PAR data unavailable — please contact Atomic Coffee Roasters before placing an order.';
+    document.querySelector('.announcement').style.background = '#b91c1c';
+    document.getElementById('company-select').innerHTML =
+      '<option disabled selected>Data unavailable</option>';
+    document.getElementById('client-view').innerHTML =
+      '<p style="padding:48px 32px;font-size:15px;color:#b91c1c;">PAR ordering data could not be loaded. Do not use this tool to place an order until this is resolved — contact <a href="mailto:orders@atomicroastery.com">orders@atomicroastery.com</a>.</p>';
+    document.getElementById('client-view').classList.remove('hidden');
+    return;
+  }
+
+  populateCompanySelect(COMPANIES);
+  const atomicIdx = COMPANIES.findIndex(c => c.isInternal);
+  switchCompany(atomicIdx >= 0 ? atomicIdx : 0);
+}
+
+loadData();
+
+// ------------------------------------------------------------------
+// CONFIG PANEL
+// ------------------------------------------------------------------
+function toggleSettings() {
+  const panel = document.getElementById('config-panel');
+  const btn   = document.getElementById('settings-toggle');
+  const opening = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !opening);
+  btn.classList.toggle('open', opening);
+}
+
+function applyConfig() {
+  const dv = parseInt(document.getElementById('cfg-days-open').value);
+  if (!isNaN(dv) && dv >= 1 && dv <= 7) CONFIG.daysOpen = dv;
+
+  const sv = parseInt(document.getElementById('cfg-safety').value);
+  if (!isNaN(sv) && sv >= DATA_FLOORS.safetyDays && sv <= 7) CONFIG.safetyDays = sv;
+
+  refreshCurrentView();
+}
+
+function resetConfig() {
+  CONFIG.daysOpen = null;
+  CONFIG.safetyDays = null;
+  document.getElementById('cfg-days-open').value = 7;
+  document.getElementById('cfg-safety').value = DATA_FLOORS.safetyDays;
+  refreshCurrentView();
+}
+
+function updateConfigWindow(daysUntil) {
+  const el   = document.getElementById('cfg-window');
+  const note = document.getElementById('cfg-window-note');
+  if (!el) return;
+  el.textContent   = daysUntil + ' days';
+  note.textContent = daysUntil > 7
+    ? 'Extended — missed cutoff, showing next available delivery'
+    : 'Days until your next scheduled delivery';
+}
+
+function refreshCurrentView() {
+  const atomicView = document.getElementById('atomic-view');
+  const adminView  = document.getElementById('admin-view');
+  if (!atomicView.classList.contains('hidden')) {
+    renderAtomicSummary();
+    if (document.getElementById('btn-by-account').classList.contains('active')) renderAtomicByAccount();
+    else renderAtomicByLocation();
+    renderSummaryStrip();
+  } else if (!adminView.classList.contains('hidden')) {
+    renderAdmin(currentCompanyId);
+  } else {
+    renderClient(currentCompanyId, currentLocationId);
+  }
+}
+
+// ------------------------------------------------------------------
+// SUMMARY STRIP (Atomic internal view only)
+// ------------------------------------------------------------------
+function renderSummaryStrip() {
+  if (summaryDismissed) return;
+  const strip = document.getElementById('summary-strip');
+  if (!strip) return;
+
+  const locs = allLocations();
+  const totalLbs = locs.reduce((s, { loc }) => {
+    const { delivery } = getDeliveryWindow(loc.deliveryDay);
+    const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
+    return s + loc.items.filter(i => i.usageUnit === 'lbs').reduce((ss, item) =>
+      ss + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
+  }, 0);
+
+  const overdueCount = locs.filter(({ loc }) => {
+    const activeItems = loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0));
+    const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
+    if (!validOrders.length) return false;
+    const lastOrder = validOrders.reduce((a, b) => b > a ? b : a);
+    return Math.floor((TODAY - lastOrder) / 86400000) > 21;
+  }).length;
+
+  const cutoffSoonCount = locs.filter(({ loc }) => {
+    const { cutoff } = getDeliveryWindow(loc.deliveryDay);
+    const h = hoursUntil(cutoff);
+    return h > 0 && h <= 24;
+  }).length;
+
+  document.getElementById('ss-accounts').textContent = COMPANIES.filter(c => !c.isInternal).length;
+  document.getElementById('ss-lbs').textContent      = totalLbs.toFixed(0) + ' lbs';
+  const od = document.getElementById('ss-overdue');
+  od.textContent = overdueCount;
+  od.className   = 'ss-value' + (overdueCount > 0 ? ' alert' : '');
+  const cs = document.getElementById('ss-cutoff');
+  cs.textContent = cutoffSoonCount;
+  cs.className   = 'ss-value' + (cutoffSoonCount > 0 ? ' warn' : '');
+
+  strip.classList.remove('hidden');
+}
+
+function dismissSummaryStrip() {
+  summaryDismissed = true;
+  document.getElementById('summary-strip').classList.add('hidden');
+}
 </script>
+
+<!-- SUMMARY STRIP -->
+<div class="summary-strip hidden" id="summary-strip">
+  <div class="ss-item">
+    <div class="ss-label">Active Accounts</div>
+    <div class="ss-value" id="ss-accounts">—</div>
+  </div>
+  <div class="ss-divider"></div>
+  <div class="ss-item">
+    <div class="ss-label">Predicted Coffee This Week</div>
+    <div class="ss-value" id="ss-lbs">—</div>
+  </div>
+  <div class="ss-divider"></div>
+  <div class="ss-item">
+    <div class="ss-label">Overdue (&gt;21 days)</div>
+    <div class="ss-value" id="ss-overdue">—</div>
+  </div>
+  <div class="ss-divider"></div>
+  <div class="ss-item">
+    <div class="ss-label">Cutoffs in &lt;24h</div>
+    <div class="ss-value" id="ss-cutoff">—</div>
+  </div>
+  <button class="ss-dismiss" onclick="dismissSummaryStrip()">✕ Dismiss</button>
+</div>
 </body>
 </html>

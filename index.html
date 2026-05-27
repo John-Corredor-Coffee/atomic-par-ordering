@@ -445,7 +445,7 @@
              onfocus="openCompanyDropdown()"
              onblur="scheduleCloseCompanyDropdown()"
              onkeydown="companySearchKey(event)">
-      <div id="company-search-list" class="cs-list"></div>
+      <div id="company-search-list" class="cs-list" onmousedown="event.preventDefault()"></div>
     </div>
     <select id="company-select" style="display:none"></select>
     <select id="location-select" class="hidden" onchange="switchLocation(this.value)"></select>
@@ -1431,7 +1431,7 @@ function _renderCsList(q) {
     : _csOptions;
   _csFocusIdx = -1;
   list.innerHTML = filtered.map(o =>
-    `<div class="cs-option" onmousedown="selectCompanyOption('${o.value}',${JSON.stringify(o.label)})">${o.label}</div>`
+    `<div class="cs-option" data-value="${o.value}" onclick="selectCompanyOption(this.dataset.value,this.textContent)">${o.label}</div>`
   ).join('');
 }
 

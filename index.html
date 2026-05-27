@@ -67,6 +67,43 @@
     }
     select:focus { outline: none; border-color: #0a0a0a; }
 
+    .cs-wrap { position: relative; }
+    .cs-input {
+      background: #ffffff;
+      color: #0a0a0a;
+      border: 1px solid #d0d0d0;
+      padding: 7px 12px;
+      font-size: 13px;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: 0.02em;
+      width: 220px;
+      box-sizing: border-box;
+      cursor: text;
+    }
+    .cs-input:focus { outline: none; border-color: #0a0a0a; }
+    .cs-list {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      min-width: 100%;
+      max-height: 280px;
+      overflow-y: auto;
+      background: #fff;
+      border: 1px solid #0a0a0a;
+      border-top: none;
+      z-index: 999;
+    }
+    .cs-list.open { display: block; }
+    .cs-option {
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: 'Outfit', sans-serif;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .cs-option:hover, .cs-option.cs-focused { background: #f0f0f0; }
+
     .view-toggle {
       display: flex;
       border: 1px solid #0a0a0a;
@@ -401,9 +438,16 @@
 <nav>
   <span class="nav-brand">PAR Ordering</span>
   <div class="nav-right">
-    <select id="company-select" onchange="switchCompany(this.value)">
-      <option>Loading…</option>
-    </select>
+    <div class="cs-wrap" id="company-search-wrap">
+      <input type="text" id="company-search-input" class="cs-input" placeholder="Search account…"
+             autocomplete="off"
+             oninput="onCompanySearch(this.value)"
+             onfocus="openCompanyDropdown()"
+             onblur="scheduleCloseCompanyDropdown()"
+             onkeydown="companySearchKey(event)">
+      <div id="company-search-list" class="cs-list"></div>
+    </div>
+    <select id="company-select" style="display:none"></select>
     <select id="location-select" class="hidden" onchange="switchLocation(this.value)"></select>
     <div class="view-toggle hidden" id="view-toggle">
       <button class="view-btn active" id="btn-client" onclick="setView('client', this)">My Orders</button>
@@ -1039,9 +1083,15 @@ function filterAdminRows(query) {
 
 function filterAtomicRows(query) {
   const q = query.trim().toLowerCase();
+  if (!q) {
+    const activeTab = document.querySelector('.account-tab.active');
+    filterAccountType(activeTab ? activeTab.dataset.filter : 'group',
+                      activeTab || document.querySelector('.account-tab'));
+    return;
+  }
   document.querySelectorAll('#atomic-tbody tr').forEach(tr => {
-    const match = !q || (tr.dataset.company || '').includes(q);
-    tr.style.display = match ? '' : 'none';
+    if (tr.classList.contains('row-child')) return;
+    tr.style.display = (tr.dataset.company || '').includes(q) ? '' : 'none';
   });
 }
 
@@ -1317,10 +1367,10 @@ function switchCompany(id) {
   viewToggle.classList.add('hidden');
   atomicToggle.classList.add('hidden');
 
-  const companySelect = document.getElementById('company-select');
+  const companySearchWrap = document.getElementById('company-search-wrap');
 
   if (company.isInternal) {
-    companySelect.classList.remove('hidden');
+    companySearchWrap.classList.remove('hidden');
     atomicToggle.classList.remove('hidden');
     document.getElementById('atomic-view').classList.remove('hidden');
     document.querySelectorAll('#atomic-toggle .view-btn').forEach(b => b.classList.remove('active'));
@@ -1335,7 +1385,7 @@ function switchCompany(id) {
   document.getElementById('summary-strip').classList.add('hidden');
   document.getElementById('cfg-window-field').style.display = '';
 
-  companySelect.classList.add('hidden');
+  companySearchWrap.classList.add('hidden');
 
   const isMulti = company.locations.length > 1;
   if (isMulti) {
@@ -1360,11 +1410,81 @@ function switchLocation(id) {
 
 // ── DATA LOADING ──────────────────────────────────────────────────────────────
 
+let _csOptions = [];
+let _csFocusIdx = -1;
+let _csCloseTimer = null;
+
 function populateCompanySelect(companies) {
-  const sel = document.getElementById('company-select');
-  sel.innerHTML = companies.map((c, i) =>
-    `<option value="${i}"${c.isInternal ? ' selected' : ''}>${c.isInternal ? '⚡ Atomic (Internal)' : c.name}</option>`
+  _csOptions = companies.map((c, i) => ({
+    value: String(i),
+    label: c.isInternal ? '⚡ Atomic (Internal)' : c.name
+  }));
+  const internalIdx = companies.findIndex(c => c.isInternal);
+  const input = document.getElementById('company-search-input');
+  if (input && internalIdx >= 0) input.value = _csOptions[internalIdx].label;
+}
+
+function _renderCsList(q) {
+  const list = document.getElementById('company-search-list');
+  const filtered = q
+    ? _csOptions.filter(o => o.label.toLowerCase().includes(q.toLowerCase()))
+    : _csOptions;
+  _csFocusIdx = -1;
+  list.innerHTML = filtered.map(o =>
+    `<div class="cs-option" onmousedown="selectCompanyOption('${o.value}',${JSON.stringify(o.label)})">${o.label}</div>`
   ).join('');
+}
+
+function onCompanySearch(val) {
+  _renderCsList(val);
+  document.getElementById('company-search-list').classList.add('open');
+}
+
+function openCompanyDropdown() {
+  clearTimeout(_csCloseTimer);
+  const input = document.getElementById('company-search-input');
+  input.select();
+  _renderCsList('');
+  document.getElementById('company-search-list').classList.add('open');
+}
+
+function scheduleCloseCompanyDropdown() {
+  _csCloseTimer = setTimeout(() => {
+    document.getElementById('company-search-list').classList.remove('open');
+    const input = document.getElementById('company-search-input');
+    const cur = _csOptions[currentCompanyId];
+    if (cur) input.value = cur.label;
+  }, 150);
+}
+
+function selectCompanyOption(value, label) {
+  clearTimeout(_csCloseTimer);
+  document.getElementById('company-search-input').value = label;
+  document.getElementById('company-search-list').classList.remove('open');
+  switchCompany(value);
+}
+
+function companySearchKey(e) {
+  const list = document.getElementById('company-search-list');
+  const items = list.querySelectorAll('.cs-option');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _csFocusIdx = Math.min(_csFocusIdx + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('cs-focused', i === _csFocusIdx));
+    items[_csFocusIdx].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _csFocusIdx = Math.max(_csFocusIdx - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('cs-focused', i === _csFocusIdx));
+    items[_csFocusIdx].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' && _csFocusIdx >= 0) {
+    e.preventDefault();
+    items[_csFocusIdx].dispatchEvent(new MouseEvent('mousedown'));
+  } else if (e.key === 'Escape') {
+    scheduleCloseCompanyDropdown();
+    document.getElementById('company-search-input').blur();
+  }
 }
 
 function normalizeCompanies(raw) {
@@ -1401,8 +1521,8 @@ async function loadData() {
     document.querySelector('.announcement').textContent =
       'PAR data unavailable — please contact Atomic Coffee Roasters before placing an order.';
     document.querySelector('.announcement').style.background = '#b91c1c';
-    document.getElementById('company-select').innerHTML =
-      '<option disabled selected>Data unavailable</option>';
+    const csi = document.getElementById('company-search-input');
+    if (csi) { csi.value = 'Data unavailable'; csi.disabled = true; }
     document.getElementById('client-view').innerHTML =
       '<p style="padding:48px 32px;font-size:15px;color:#b91c1c;">PAR ordering data could not be loaded. Do not use this tool to place an order until this is resolved — contact <a href="mailto:orders@atomicroastery.com">orders@atomicroastery.com</a>.</p>';
     document.getElementById('client-view').classList.remove('hidden');

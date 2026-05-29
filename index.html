@@ -254,6 +254,18 @@
     }
     .tag-predicted { background: #e8f4ff; color: #1a6b9a; }
     .tag-corrected { background: #dcfce7; color: #166534; }
+    .tag-stale     { background: #fef3c7; color: #92400e; }
+
+    .stale-banner {
+      background: #fffbef;
+      border: 1px solid #f59e0b;
+      border-left: 4px solid #f59e0b;
+      padding: 12px 20px;
+      font-size: 13px;
+      color: #78350f;
+      margin-bottom: 16px;
+    }
+    .stale-banner strong { font-weight: 700; }
 
     .rec-bags { font-family: 'Cooper Black', serif; font-size: 22px; font-weight: 400; }
     .rec-bags.none { color: #10b981; }
@@ -492,6 +504,7 @@
       <p>Based on your order history, PAR (Periodic Automatic Replenishment) calculates exactly what to order for your next delivery — factoring in how fast you go through each product, when your delivery arrives, and a safety buffer so you never run out unexpectedly.</p>
     </div>
     <div id="order-window" class="order-window"></div>
+    <div id="stale-banner" style="display:none"></div>
     <div class="card">
       <div class="card-header">
         <span class="card-title">Recommended Order</span>
@@ -808,6 +821,21 @@ function renderClient(companyId, locationId) {
   const canItems   = activeItems.filter(i => i.usageUnit === 'cans' && i.sku !== 'CANS02');
   const otherItems = activeItems.filter(i => i.usageUnit !== 'cans');
 
+  // Stale-prediction failsafe: if last order was 28+ days ago, warn and tag on-hand as stale
+  const lastOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
+  const locLastOrder = lastOrders.length ? lastOrders.reduce((a, b) => b > a ? b : a) : null;
+  const locDaysSince = locLastOrder ? Math.floor((TODAY - locLastOrder) / 86400000) : 999;
+  const isStale = locDaysSince >= 28;
+  const staleBanner = document.getElementById('stale-banner');
+  if (isStale) {
+    const weeks = Math.floor(locDaysSince / 7);
+    staleBanner.style.display = '';
+    staleBanner.innerHTML = `<div class="stale-banner">⚠ <strong>On-hand estimates may be off.</strong> This account hasn't ordered in ${weeks} week${weeks !== 1 ? 's' : ''} — verify actual stock before placing an order.</div>`;
+  } else {
+    staleBanner.style.display = 'none';
+    staleBanner.innerHTML = '';
+  }
+
   // Helper: render one standard item row
   const renderItemRow = (item, extraClass = '') => {
     const key = `${companyId}-${locationId}-${item.sku}`;
@@ -842,7 +870,7 @@ function renderClient(companyId, locationId) {
           />
           <button class="onhand-btn" onclick="adjustOnHand('${key}', 1, ${onHandStep(item)}, this)">+</button>
           <span class="onhand-unit">${item.usageUnit}</span>
-          <span class="data-tag ${isEdited ? 'tag-corrected' : 'tag-predicted'}">${isEdited ? 'corrected' : 'predicted'}</span>
+          <span class="data-tag ${isEdited ? 'tag-corrected' : isStale ? 'tag-stale' : 'tag-predicted'}">${isEdited ? 'corrected' : isStale ? 'stale' : 'predicted'}</span>
         </div>
       </td>
       <td>
@@ -945,7 +973,7 @@ function renderClient(companyId, locationId) {
             />
             <button class="onhand-btn" onclick="adjustOnHand('${canKey}', 1, 12, this)">+</button>
             <span class="onhand-unit">cans</span>
-            <span class="data-tag ${isEdited ? 'tag-corrected' : 'tag-predicted'}">${isEdited ? 'corrected' : 'predicted'}</span>
+            <span class="data-tag ${isEdited ? 'tag-corrected' : isStale ? 'tag-stale' : 'tag-predicted'}">${isEdited ? 'corrected' : isStale ? 'stale' : 'predicted'}</span>
           </div>
         </td>
         <td>

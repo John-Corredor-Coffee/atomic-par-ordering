@@ -1077,13 +1077,13 @@ function renderAdmin(companyId) {
     const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
     const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
     const lastOrder = validOrders.length ? validOrders.reduce((a, b) => b > a ? b : a) : null;
-    const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : 999;
+    const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : null;
     return { loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince };
   }));
 
   rows.forEach(({ loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince }) => {
     let status, dotClass;
-    if (daysSince > 21)                { status = 'Overdue';     dotClass = 'dot-red'; }
+    if (lastOrder && daysSince > 21)   { status = 'Overdue';     dotClass = 'dot-red'; }
     else if (hours <= 24 && hours > 0) { status = 'Cutoff Soon'; dotClass = 'dot-amber'; }
     else                               { status = 'On Track';    dotClass = 'dot-green'; }
 
@@ -1145,9 +1145,9 @@ function locationSummary(loc) {
   const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
   const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
   const lastOrder = validOrders.length ? validOrders.reduce((a, b) => b > a ? b : a) : null;
-  const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : 999;
+  const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : null;
   let status, dotClass;
-  if (daysSince > 21)                { status = 'Overdue';     dotClass = 'dot-red'; }
+  if (lastOrder && daysSince > 21)   { status = 'Overdue';     dotClass = 'dot-red'; }
   else if (hours <= 24 && hours > 0) { status = 'Cutoff Soon'; dotClass = 'dot-amber'; }
   else                               { status = 'On Track';    dotClass = 'dot-green'; }
   return { cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass };
@@ -1171,7 +1171,7 @@ function renderAtomicByLocation() {
   }));
 
   document.getElementById('atomic-tbody').innerHTML = rows.map(({ company, loc, cutoff, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => {
-    const atRisk = daysSince >= 30;
+    const atRisk = lastOrder && daysSince >= 30;
     return `<tr${atRisk ? ' class="row-at-risk"' : ''} data-company="${company.name.toLowerCase()}">
       <td style="color:rgba(0,0,0,0.45);font-size:13px">${company.name}</td>
       <td><strong>${loc.name}</strong></td>

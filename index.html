@@ -1220,19 +1220,18 @@ function renderAtomicByAccount() {
   // blockCid: unique ID for this block (used by toggleCompany)
   // label: suffix shown after company name (e.g. "2 at-risk locations")
   const buildBlock = (company, blockSums, atype, blockCid, label) => {
-    const bIsAtRisk = atype === 'needs-review';
     const showExpandable = blockSums.length > 1;
     const bLastOrders = blockSums.map(s => s.lastOrder).filter(Boolean);
     const bLastOrder  = bLastOrders.length ? bLastOrders.reduce((a, b) => b > a ? b : a) : null;
-    const bDaysSince  = bLastOrder ? Math.floor((TODAY - bLastOrder) / 86400000) : 999;
+    const bDaysSince  = bLastOrder ? Math.floor((TODAY - bLastOrder) / 86400000) : null;
     const bTotalLbs   = blockSums.reduce((s, r) => s + r.totalLbs, 0);
     const bAvgYoy     = blockSums.reduce((s, r) => s + r.avgYoy, 0) / blockSums.length;
     const bAvgW3      = blockSums.reduce((s, r) => s + r.avgW3,  0) / blockSums.length;
     const bWorst = blockSums.find(r => r.status === 'Overdue') ? 'Overdue'
       : blockSums.find(r => r.status === 'Cutoff Soon') ? 'Cutoff Soon' : 'On Track';
-    const bDot    = bIsAtRisk ? 'dot-red' : (bWorst === 'Overdue' ? 'dot-red' : bWorst === 'Cutoff Soon' ? 'dot-amber' : 'dot-green');
-    const statusText = bIsAtRisk ? 'At Risk' : bWorst;
-    const atRiskCls  = bIsAtRisk ? ' row-at-risk' : '';
+    const bDot    = bWorst === 'Overdue' ? 'dot-red' : bWorst === 'Cutoff Soon' ? 'dot-amber' : 'dot-green';
+    const statusText = bWorst;
+    const atRiskCls  = '';
     const chevron    = showExpandable ? `<span class="collapse-chevron">▾</span>` : '';
     const delivDays  = [...new Set(blockSums.map(s => s.loc.deliveryDay))]
       .map(d => d[0].toUpperCase() + d.slice(1, 3)).join(', ');
@@ -1249,15 +1248,14 @@ function renderAtomicByAccount() {
 
     const childRows = showExpandable ? [...blockSums].sort((a, b) => b.totalLbs - a.totalLbs)
       .map(({ loc, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => {
-        const cAtRisk = lDays >= 30;
-        return `<tr class="row-child${cAtRisk ? ' row-at-risk' : ''}" data-parent-cid="${blockCid}" data-atype="${atype}" data-company="${company.name.toLowerCase()}" style="display:none">
+        return `<tr class="row-child" data-parent-cid="${blockCid}" data-atype="${atype}" data-company="${company.name.toLowerCase()}" style="display:none">
           <td>${loc.name}</td>
           <td style="text-transform:capitalize">${loc.deliveryDay}</td>
           <td>${fmtLastOrder(lLast, lDays)}</td>
           <td>${fmtLbs(lLbs)}</td>
           <td><span class="trend-pill ${trendClass(lYoy)}">${trendArrow(lYoy)} ${(lYoy*100).toFixed(1)}%</span></td>
           <td><span class="trend-pill ${trendClass(lW3)}">${trendArrow(lW3)} ${(lW3*100).toFixed(1)}%</span></td>
-          <td><span class="status-dot ${cAtRisk ? 'dot-red' : lDot}"></span>${cAtRisk ? 'At Risk' : status}</td>
+          <td><span class="status-dot ${lDot}"></span>${status}</td>
         </tr>`;
       }).join('') : '';
 
@@ -1267,8 +1265,8 @@ function renderAtomicByAccount() {
   const buildRow = ({ company, summaries }) => {
     const isMulti  = company.locations.length > 1;
     const cid      = company.id;
-    const atRiskSums  = summaries.filter(s => s.daysSince >= 30);
-    const healthySums = summaries.filter(s => s.daysSince < 30);
+    const atRiskSums  = summaries.filter(s => s.daysSince !== null && s.daysSince >= 30);
+    const healthySums = summaries.filter(s => s.daysSince === null || s.daysSince < 30);
     const isMixed  = atRiskSums.length > 0 && healthySums.length > 0;
 
     if (isMixed) {

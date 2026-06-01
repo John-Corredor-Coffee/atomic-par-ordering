@@ -829,7 +829,7 @@ function renderClient(companyId, locationId) {
   const lastOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
   const locLastOrder = lastOrders.length ? lastOrders.reduce((a, b) => b > a ? b : a) : null;
   const locDaysSince = locLastOrder ? Math.floor((TODAY - locLastOrder) / 86400000) : 999;
-  const isStale = locDaysSince >= 28;
+  const isStale = locDaysSince >= 30;
   const staleBanner = document.getElementById('stale-banner');
   if (isStale) {
     const weeks = Math.floor(locDaysSince / 7);
@@ -1220,7 +1220,7 @@ function renderAtomicByAccount() {
   // blockCid: unique ID for this block (used by toggleCompany)
   // label: suffix shown after company name (e.g. "2 at-risk locations")
   const buildBlock = (company, blockSums, atype, blockCid, label) => {
-    const showExpandable = blockSums.length > 1;
+    const showExpandable = blockSums.length > 1 || (atype === 'needs-review' && company.locations.length > blockSums.length);
     const bLastOrders = blockSums.map(s => s.lastOrder).filter(Boolean);
     const bLastOrder  = bLastOrders.length ? bLastOrders.reduce((a, b) => b > a ? b : a) : null;
     const bDaysSince  = bLastOrder ? Math.floor((TODAY - bLastOrder) / 86400000) : null;

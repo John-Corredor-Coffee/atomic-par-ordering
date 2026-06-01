@@ -743,7 +743,7 @@ function fmtShort(d) {
   return d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
 }
 function fmtLastOrder(d, daysSince) {
-  if (daysSince >= 30) return `<span style="color:#dc2626;font-weight:600">1m+</span>`;
+  if (daysSince >= 30) return `${fmtShort(d)} <span style="color:#dc2626;font-weight:600">(${daysSince}d ago)</span>`;
   return `${fmtShort(d)} <span style="color:rgba(0,0,0,0.35);font-size:12px">(${daysSince}d ago)</span>`;
 }
 function hoursUntil(d) { return (d - TODAY) / (1000 * 60 * 60); }

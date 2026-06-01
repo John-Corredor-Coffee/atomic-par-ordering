@@ -615,7 +615,7 @@ function colVal(row, col) {
     case 'totalLbs':    return row.totalLbs;
     case 'yoy':         return row.avgYoy;
     case 'w3':          return row.avgW3;
-    case 'lastOrder':   return row.lastOrder ? +row.lastOrder : 0;
+    case 'lastOrder':   return row.lastOrder ? +row.lastOrder : null;
     case 'cutoff':      return row.cutoff ? +row.cutoff : 0;
     case 'status':      return S[row.status ?? row.worstStatus] ?? 3;
     case 'name':        return ((row.company ? row.company.name : '') || (row.loc ? row.loc.name : '') || '').toLowerCase();
@@ -634,6 +634,9 @@ function colVal(row, col) {
 function applySortRows(rows) {
   return [...rows].sort((a, b) => {
     const av = colVal(a, sortState.col), bv = colVal(b, sortState.col);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
     if (typeof av === 'string') return sortState.dir * av.localeCompare(bv);
     return sortState.dir * (av - bv);
   });

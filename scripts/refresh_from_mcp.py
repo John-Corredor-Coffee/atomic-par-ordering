@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+"""
+PAR Ordering — Build data.json from MCP ShopifyQL output files.
+
+Usage (Claude Code runs the 10 queries via MCP, then calls this):
+  python3 scripts/refresh_from_mcp.py <60d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p>
+
+Each file is the raw JSON saved by the run-analytics-query MCP tool:
+  { "columns": [{"name": ...}], "rows": [[...], ...], "rowCount": N, ... }
+
+Queries (all: FROM sales SHOW quantity_ordered GROUP BY company_name, company_location_name, product_variant_sku, product_title WHERE company_name != '' ORDER BY quantity_ordered DESC LIMIT 5000):
+  60d    — SINCE -60d  UNTIL today
+  w3l    — SINCE -21d  UNTIL today
+  w3p    — SINCE -42d  UNTIL -21d
+  last   — FROM sales SHOW quantity_ordered, day GROUP BY ... SINCE -60d UNTIL today ORDER BY day DESC LIMIT 5000
+  ly_w3l — SINCE -386d UNTIL -365d  (LY 21-day window matching w3l)
+  ly_w3p — SINCE -407d UNTIL -386d  (LY 21-day window matching w3p)
+  w7l    — SINCE -49d  UNTIL today
+  w7p    — SINCE -98d  UNTIL -49d
+  ly_w7l — SINCE -414d UNTIL -365d  (LY 49-day window matching w7l)
+  ly_w7p — SINCE -463d UNTIL -414d  (LY 49-day window matching w7p)
+"""
+
+import json
+import sys
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict, Counter
+from pathlib import Path
+
+# ── CONSTANTS (mirrors agg.py) ────────────────────────────────────────────────
+TODAY       = datetime.now(timezone.utc)
+WINDOW_DAYS = 60
+
+INTERNAL_NAMES = {'Atomic Coffee Roasters (Internal)'}
+
+SKIP_PREFIXES = (
+    'CYL-', 'KEGERATOR', 'HANDLE01', 'TAP01', 'COUPLER', 'REG01', 'SPOUT01',
+    'TAMP', 'PALLO', 'GRNDZ', 'CFZA', 'RINZA', 'SHOTS', 'BRWTG', 'KNOCK',
+    'FIL0', 'SLEEVES', 'SERVING', 'COPACK', 'SMITH', 'NS-',
+    'TECH-', 'THIRDPARTY', 'PL-', 'FET-', 'SPACEH', 'WMFC',
+    'AMOJU', 'BALINAT', 'KOMBUCHA', 'BOOCH', 'DCF-CANS',
+    'LOUD-CANS', 'CANS0', 'CANS1', 'CANS2',
+)
+SKIP_SUFFIXES = ('-S', '-GC', '-D')
+SKIP_FRAGS    = (
+    'sample', 'screwdriver', 'knockbox', 'tamping mat', 'grindminder', 'brush',
+    'barista basics', 'nitrogen', 'regulator', 'kegerator', 'tap handle',
+    'spout', 'tech service', 'tech travel', 'technician', 'filter cartridge',
+    'filter head', 'tubing', 'adapter', 'compression', 'hoodie',
+    'cafiza', 'rinza', 'john guest', 'polyethylene', 'everpure',
+    'pour-', 'frothing pitcher', 'wmf clean',
+)
+CONSUMABLE_SKUS = {
+    'HSE501', 'HSE201', 'BV501', 'BV201', 'RKT501', 'RKT201', 'COS501', 'COS201',
+    'INT501', 'INT201', 'DCF501', 'DCF201', 'DSL501', 'DSL201', 'CB501', 'CB201',
+    'CAB501', 'CAB201', 'COL501', 'COL201', 'MAG501', 'MAG201', 'LOUD501',
+    'HSE1201-RC', 'BV1201-RC', 'RKT1201-RC', 'COS1201-RC', 'INT1201-RC',
+    'DCF1201-RC', 'DSL1201-RC', 'CB1201-RC', 'CAB1201-RC', 'COL1201-RC',
+    'MAG1201-RC', 'LOUD1201-RC', 'GEDEO1201-RC', 'AMOJU1201-RC',
+    'CONC-BIB1', 'CBKEG01', 'CBKEG02', 'CBK01-S', 'CBK02-S', 'JPKEG',
+    'CANS01', 'CANS02', 'LOUD-CANS', 'DCF-CANS',
+    'RKTPP-3.5', 'RKTPP-5', 'DCFPP-3.5', 'DCFPP-2.5',
+    'MF-CHAI', 'MF-OAT', 'SMITH-WS-PMTCH',
+}
+
+
+def skip_sku(sku, name):
+    if not sku:
+        return True
+    if sku in CONSUMABLE_SKUS:
+        return False
+    up = sku.upper()
+    for p in SKIP_PREFIXES:
+        if up.startswith(p.upper()):
+            return True
+    for s in SKIP_SUFFIXES:
+        if up.endswith(s.upper()):
+            return True
+    nl = name.lower()
+    for f in SKIP_FRAGS:
+        if f in nl:
+            return True
+    return False
+
+
+def classify_sku(sku, name):
+    up = (sku or '').upper()
+    nl = name.lower()
+    if up.endswith('501') or '- 5lb' in nl:
+        return ('lbs', 'bag', 5)
+    if up.endswith('201') and not up.endswith('201-D'):
+        return ('lbs', 'bag', 2)
+    if up.endswith('-LM') or 'local market case' in nl:
+        return ('lbs', 'case', 12)
+    if up.endswith('-RC') or 'retail case' in nl:
+        return ('lbs', 'case', 4.5)
+    if up.startswith('CONC-'):
+        return ('boxes', 'case', 2)
+    if up.startswith('CBKEG') or up.startswith('CBK0') or up.startswith('JPKEG'):
+        return ('kegs', 'keg', 1)
+    if 'CANS' in up or up.endswith('-CANS'):
+        return ('cans', 'case', 12)
+    if 'PP-' in up or 'RKTPP' in up or 'DCFPP' in up:
+        return ('boxes', 'box', 1)
+    if 'MF-CHAI' in up or ('CHAI' in up and 'MF' in up):
+        return ('cartons', 'case', 4)
+    if 'OAT' in up:
+        return ('cartons', 'case', 6)
+    if 'PMTCH' in up or 'MATCHA' in up:
+        return ('tins', 'case', 12)
+    return ('units', 'unit', 1)
+
+
+def load_mcp_file(path):
+    """Parse MCP tool-result JSON → list of row dicts."""
+    data = json.loads(Path(path).read_text())
+    cols = [c['name'] for c in data['columns']]
+    return [dict(zip(cols, row)) for row in data['rows']]
+
+
+def build_last_lookup(rows):
+    """
+    Build {(company, location, sku): (date_str, qty)} from the last-order query rows.
+    Rows must be pre-sorted ORDER BY day DESC so the first hit per key = most recent date.
+    """
+    lookup = {}
+    for row in rows:
+        cname = (row.get('company_name') or '').strip()
+        lname = (row.get('company_location_name') or '').strip()
+        sku   = (row.get('product_variant_sku') or '').strip()
+        name  = (row.get('product_title') or '').strip()
+        date_str = (row.get('day') or '').strip()
+        try:
+            qty = int(float(row.get('quantity_ordered') or 0))
+        except (ValueError, TypeError):
+            qty = 0
+        if not cname or cname in INTERNAL_NAMES or not sku or qty == 0 or not date_str:
+            continue
+        if skip_sku(sku, name):
+            continue
+        key = (cname, lname, sku)
+        if key not in lookup:
+            lookup[key] = (date_str, qty)
+    return lookup
+
+
+def build_yoy_lookup(rows):
+    """Build {(company, location, sku): total_qty} from the prior-year 21-day window (same as w3l)."""
+    lookup = {}
+    for row in rows:
+        cname = (row.get('company_name') or '').strip()
+        lname = (row.get('company_location_name') or '').strip()
+        sku   = (row.get('product_variant_sku') or '').strip()
+        name  = (row.get('product_title') or '').strip()
+        try:
+            qty = int(float(row.get('quantity_ordered') or 0))
+        except (ValueError, TypeError):
+            qty = 0
+        if not cname or cname in INTERNAL_NAMES or not sku or qty == 0:
+            continue
+        if skip_sku(sku, name):
+            continue
+        key = (cname, lname, sku)
+        lookup[key] = lookup.get(key, 0) + qty
+    return lookup
+
+
+def load_delivery_days():
+    lookup = {}
+    data_file = Path(__file__).parent.parent / 'data.json'
+    if data_file.exists():
+        payload = json.loads(data_file.read_text())
+        for company in payload.get('companies', []):
+            for loc in company.get('locations', []):
+                lookup[(company['name'], loc['name'])] = loc.get('deliveryDay', 'wednesday')
+    return lookup
+
+
+def aggregate(rows_60d, rows_w3l, rows_w3p, rows_ly_w3l, rows_ly_w3p,
+              rows_w7l, rows_w7p, rows_ly_w7l, rows_ly_w7p, delivery_days):
+    locs = {}
+
+    def ensure(cname, lname):
+        key = (cname, lname)
+        if key not in locs:
+            locs[key] = {
+                'company_name':  cname,
+                'location_name': lname,
+                'delivery_day':  delivery_days.get(key, 'wednesday'),
+                'skus': {},
+            }
+        return locs[key]
+
+    def add(rows, field):
+        for row in rows:
+            cname = (row.get('company_name') or '').strip()
+            lname = (row.get('company_location_name') or '').strip()
+            sku   = (row.get('product_variant_sku') or '').strip()
+            name  = (row.get('product_title') or '').strip()
+            try:
+                qty = int(float(row.get('quantity_ordered') or 0))
+            except (ValueError, TypeError):
+                qty = 0
+            if not cname or cname in INTERNAL_NAMES or not sku or qty == 0:
+                continue
+            if skip_sku(sku, name):
+                continue
+            loc = ensure(cname, lname)
+            if sku not in loc['skus']:
+                loc['skus'][sku] = {'name': name, 'qty60': 0,
+                                    'qw3l': 0, 'qw3p': 0, 'qly_w3l': 0, 'qly_w3p': 0,
+                                    'qw7l': 0, 'qw7p': 0, 'qly_w7l': 0, 'qly_w7p': 0}
+            loc['skus'][sku][field] += qty
+            if not loc['skus'][sku]['name']:
+                loc['skus'][sku]['name'] = name
+
+    add(rows_60d,    'qty60')
+    add(rows_w3l,    'qw3l')
+    add(rows_w3p,    'qw3p')
+    add(rows_ly_w3l, 'qly_w3l')
+    add(rows_ly_w3p, 'qly_w3p')
+    add(rows_w7l,    'qw7l')
+    add(rows_w7p,    'qw7p')
+    add(rows_ly_w7l, 'qly_w7l')
+    add(rows_ly_w7p, 'qly_w7p')
+    return locs
+
+
+ITEM_ORDER = {'lbs': 0, 'boxes': 1, 'kegs': 2, 'cans': 3, 'cartons': 4, 'tins': 5}
+
+CATALOG_TAGS = {
+    'standard-cafe', 'standard-cafe-cans-kegs', 'standard-cafe-pp-cans-kegs',
+    'standard-cafe-pp-cans-sankey', 'standard-cafe-pp-cans-dlv', 'standard-cafe-pp-cans-ship',
+    'standard-cafe-pp', 'standard-cafe-cans-sankey', 'standard-cafe-cans-dlv',
+    'standard-cafe-cans-ship', 'local-market', 'local-market-cans',
+}
+
+
+def sku_matches_catalog(sku, name, catalog_tag):
+    """Return True if this SKU should be shown for the given catalog tag."""
+    tag = (catalog_tag or '').lower()
+    if not tag:
+        return False
+    u, o, _ = classify_sku(sku, name)
+    is_cafe   = tag.startswith('standard-cafe')
+    is_market = tag.startswith('local-market')
+    has_cans  = 'cans' in tag
+    has_kegs  = 'kegs' in tag or 'sankey' in tag
+    has_pp    = '-pp' in tag
+    if is_cafe:
+        if u == 'lbs' and o == 'bag':    return True   # whole beans
+        if u in ('cartons', 'tins'):     return True   # specialty
+        if u == 'cans'  and has_cans:    return True
+        if u == 'kegs'  and has_kegs:    return True
+        if u == 'boxes' and o == 'box'   and has_pp:              return True  # portion packs
+        if u == 'boxes' and o == 'case'  and (has_kegs or has_cans): return True  # concentrate
+    if is_market:
+        if u == 'lbs'  and o == 'case':  return True   # retail cases
+        if u == 'cans' and has_cans:     return True
+    return False
+
+
+def collect_sku_names(locs):
+    """Build {sku: product_name} from aggregated order data."""
+    names = {}
+    for loc in locs.values():
+        for sku, sk in loc['skus'].items():
+            if sku not in names and sk['name']:
+                names[sku] = sk['name']
+    return names
+
+
+def parse_companies_file(path):
+    """
+    Parse the GraphQL companies JSON saved by the par-refresh skill.
+    Expected format: {"companies": [{name, createdAt, ordersCount, locations, catalogTag}, ...]}
+    Returns list of dicts for companies created < 60 days ago with ordersCount == 0.
+    """
+    data = json.loads(Path(path).read_text())
+    companies = data.get('companies', [])
+    result = []
+    cutoff = TODAY - timedelta(days=60)
+    for co in companies:
+        try:
+            created = datetime.fromisoformat(co['createdAt'].replace('Z', '+00:00'))
+        except (KeyError, ValueError):
+            continue
+        if created.replace(tzinfo=None) >= cutoff.replace(tzinfo=None):
+            result.append(co)
+    return result
+
+
+def compute_benchmarks(locs):
+    """Per-SKU average daily rate from established single-location (independent) accounts."""
+    loc_counts = Counter(cname for (cname, _) in locs)
+    sku_rates = defaultdict(list)
+    for (cname, _), loc in locs.items():
+        if loc_counts[cname] != 1:
+            continue
+        for sku, sk in loc['skus'].items():
+            if sk['qw3l'] > 0 and sk['qw3p'] > 0:
+                sku_rates[sku].append(sk['qw3l'] / 21)
+    return {sku: round(sum(rates) / len(rates), 3) for sku, rates in sku_rates.items()}
+
+
+def build_json(locs, last_lookup, benchmarks, new_companies=None, sku_names=None):
+    by_company = defaultdict(lambda: {'name': None, 'locations': []})
+
+    for (cname, lname), loc in locs.items():
+        items = []
+        for sku, sk in loc['skus'].items():
+            if sk['qty60'] == 0:
+                continue
+            w3l        = sk['qw3l'];  w3p     = sk['qw3p']
+            if w3p > 0:
+                avg_daily = round(w3l / 21, 3) if w3l > 0 else round(w3p / 21, 3)
+            elif w3l > 0:
+                bench = benchmarks.get(sku, 0)
+                avg_daily = round(bench, 3) if bench > 0 else round(w3l / 21, 3)
+            else:
+                avg_daily = round(sk['qty60'] / WINDOW_DAYS, 3)
+            ly_w3l     = sk['qly_w3l']; ly_w3p = sk['qly_w3p']
+            w7l        = sk['qw7l'];  w7p     = sk['qw7p']
+            ly_w7l     = sk['qly_w7l']; ly_w7p = sk['qly_w7p']
+            w3         = round(w3l / w3p - 1, 3)     if w3p    > 0 else 0.0
+            ly_w3      = round(ly_w3l / ly_w3p - 1, 3) if ly_w3p > 0 else 0.0
+            w7         = round(w7l / w7p - 1, 3)     if w7p    > 0 else 0.0
+            ly_w7      = round(ly_w7l / ly_w7p - 1, 3) if ly_w7p > 0 else 0.0
+            _yoy_valid = ly_w3l >= 1 and (w3l == 0 or ly_w3l / w3l >= 0.10)
+            yoy        = round((w3l - ly_w3l) / ly_w3l, 3) if _yoy_valid else 0.0
+            u, o, upo  = classify_sku(sku, sk['name'])
+            last_date, last_qty = last_lookup.get((cname, lname, sku), ('', 0))
+            # If day-level query missed this SKU (LIMIT 5000 cutoff), estimate from windows.
+            if not last_date:
+                if w3l > 0:
+                    last_date = (TODAY - timedelta(days=10)).strftime('%Y-%m-%d')
+                elif sk['qw3p'] > 0:
+                    last_date = (TODAY - timedelta(days=31)).strftime('%Y-%m-%d')
+                elif sk['qty60'] > 0:
+                    last_date = (TODAY - timedelta(days=51)).strftime('%Y-%m-%d')
+            items.append({
+                'sku': sku, 'name': sk['name'],
+                'usageUnit': u, 'orderUnit': o, 'unitsPerOrder': upo,
+                'avgDaily': avg_daily, 'yoy': yoy,
+                'w3': w3, 'ly_w3': ly_w3,
+                'w7': w7, 'ly_w7': ly_w7,
+                'qw3l': w3l, 'qly_w3l': ly_w3l,
+                'lastOrderDate': last_date, 'lastOnHand': last_qty,
+            })
+        if not items:
+            continue
+        items.sort(key=lambda i: (ITEM_ORDER.get(i['usageUnit'], 9), i['name']))
+        c = by_company[cname]
+        c['name'] = cname
+        c['locations'].append({
+            'id': len(c['locations']),
+            'name': lname,
+            'deliveryDay': loc['delivery_day'] or 'wednesday',
+            'daysOpen': 7, 'safetyDays': 3,
+            'items': items,
+        })
+
+    # Inject week-zero accounts: companies <60 days old with no order history
+    if new_companies:
+        sku_names = sku_names or {}
+        for co in new_companies:
+            cname = co.get('name', '').strip()
+            if not cname or cname in by_company:
+                continue
+            catalog_tag = co.get('catalogTag') or ''
+            if catalog_tag not in CATALOG_TAGS:
+                continue
+            items = []
+            for sku, rate in sorted(benchmarks.items(), key=lambda x: -x[1]):
+                sname = sku_names.get(sku, sku)
+                u, o, upo = classify_sku(sku, sname)
+                if sku_matches_catalog(sku, sname, catalog_tag):
+                    items.append({
+                        'sku': sku, 'name': sname,
+                        'usageUnit': u, 'orderUnit': o, 'unitsPerOrder': upo,
+                        'avgDaily': rate, 'yoy': 0,
+                        'w3': 0, 'ly_w3': 0, 'w7': 0, 'ly_w7': 0,
+                        'qw3l': 0, 'qly_w3l': 0,
+                        'lastOrderDate': '', 'lastOnHand': 0,
+                        'weekZero': True,
+                    })
+            if not items:
+                continue
+            items.sort(key=lambda i: (ITEM_ORDER.get(i['usageUnit'], 9), i['name']))
+            c = by_company[cname]
+            c['name'] = cname
+            for loc_name in (co.get('locations') or [cname]):
+                c['locations'].append({
+                    'id': len(c['locations']),
+                    'name': loc_name,
+                    'deliveryDay': co.get('deliveryDay', 'wednesday'),
+                    'daysOpen': 7, 'safetyDays': 5,
+                    'items': items,
+                })
+
+    companies = []
+    for idx, c in enumerate(sorted(by_company.values(), key=lambda x: (x['name'] or '').lower())):
+        if c['locations']:
+            companies.append({'id': idx, 'name': c['name'], 'locations': c['locations']})
+
+    companies.append({
+        'id': len(companies),
+        'name': 'Atomic Coffee Roasters (Internal)',
+        'isInternal': True, 'locations': [],
+    })
+    return companies
+
+
+def main():
+    if len(sys.argv) not in (11, 12):
+        sys.exit("Usage: refresh_from_mcp.py <60d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p> [companies]")
+
+    args = sys.argv[1:]
+    f60, fw3l, fw3p, flast, fly_w3l, fly_w3p, fw7l, fw7p, fly_w7l, fly_w7p = args[:10]
+    fcompanies = args[10] if len(args) == 11 else None
+    print("Loading MCP result files...")
+    rows_60d    = load_mcp_file(f60)
+    rows_w3l    = load_mcp_file(fw3l)
+    rows_w3p    = load_mcp_file(fw3p)
+    rows_last   = load_mcp_file(flast)
+    rows_ly_w3l = load_mcp_file(fly_w3l)
+    rows_ly_w3p = load_mcp_file(fly_w3p)
+    rows_w7l    = load_mcp_file(fw7l)
+    rows_w7p    = load_mcp_file(fw7p)
+    rows_ly_w7l = load_mcp_file(fly_w7l)
+    rows_ly_w7p = load_mcp_file(fly_w7p)
+    print(f"  60d:{len(rows_60d)} w3l:{len(rows_w3l)} w3p:{len(rows_w3p)} last:{len(rows_last)} "
+          f"ly_w3l:{len(rows_ly_w3l)} ly_w3p:{len(rows_ly_w3p)} "
+          f"w7l:{len(rows_w7l)} w7p:{len(rows_w7p)} ly_w7l:{len(rows_ly_w7l)} ly_w7p:{len(rows_ly_w7p)}")
+
+    delivery_days = load_delivery_days()
+    print(f"  Delivery day lookup: {len(delivery_days)} locations")
+
+    last_lookup = build_last_lookup(rows_last)
+    print(f"  Last-order lookup: {len(last_lookup)} SKUs")
+
+    locs = aggregate(rows_60d, rows_w3l, rows_w3p, rows_ly_w3l, rows_ly_w3p,
+                     rows_w7l, rows_w7p, rows_ly_w7l, rows_ly_w7p, delivery_days)
+    benchmarks = compute_benchmarks(locs)
+    print(f"  Independent benchmarks: {len(benchmarks)} SKUs")
+    sku_names = collect_sku_names(locs)
+    new_companies = None
+    if fcompanies:
+        new_companies = parse_companies_file(fcompanies)
+        print(f"  New accounts (< 60 days, 0 orders): {len(new_companies)}")
+    companies = build_json(locs, last_lookup, benchmarks, new_companies, sku_names)
+
+    out = Path(__file__).parent.parent / 'data.json'
+    payload = {
+        'generated':  TODAY.isoformat(),
+        'windowDays': WINDOW_DAYS,
+        'companies':  companies,
+    }
+    out.write_text(json.dumps(payload, indent=2, default=str))
+
+    active = len([c for c in companies if not c.get('isInternal')])
+    print(f"\ndata.json written — {active} companies, {sum(len(c['locations']) for c in companies if not c.get('isInternal'))} locations")
+
+
+if __name__ == '__main__':
+    main()

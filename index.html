@@ -1339,11 +1339,8 @@ function filterAccountType(type, btn) {
     const matches = isMissedTab ? row.dataset.missed === 'true' : row.dataset.atype === type;
     if (matches) {
       if (row.classList.contains('row-child')) {
-        // For missed-cutoff tab: show child rows directly (no collapse nesting)
-        row.style.display = isMissedTab ? '' : (() => {
-          const parent = document.querySelector(`tr.row-parent[data-cid="${row.dataset.parentCid}"]`);
-          return (parent && parent.classList.contains('collapsed')) ? 'none' : '';
-        })();
+        const parent = document.querySelector(`tr.row-parent[data-cid="${row.dataset.parentCid}"]`);
+        row.style.display = (parent && parent.classList.contains('collapsed')) ? 'none' : '';
       } else {
         row.style.display = '';
       }

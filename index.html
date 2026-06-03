@@ -541,6 +541,7 @@
             <button class="account-tab active" data-filter="group" onclick="filterAccountType('group', this)">Groups</button>
             <button class="account-tab" data-filter="independent" onclick="filterAccountType('independent', this)">Independent</button>
             <button class="account-tab" data-filter="needs-review" onclick="filterAccountType('needs-review', this)">Needs Review</button>
+            <button class="account-tab" data-filter="missed-cutoff" onclick="filterAccountType('missed-cutoff', this)">Missed Cutoff</button>
           </div>
           <span class="card-hint" id="atomic-card-hint">Sorted by predicted order volume this week</span>
         </div>
@@ -693,6 +694,26 @@ function cutoffFor(deliveryDay, deliveryDate) {
   d.setDate(d.getDate() - (CUTOFF_DAYS_BACK[deliveryDay] || 3));
   d.setHours(23, 59, 0, 0);
   return d;
+}
+
+// Returns the most recently passed cutoff for a delivery day.
+// An account has "missed" it if their last order predates this.
+function getLastPassedCutoff(deliveryDay) {
+  const { delivery } = getDeliveryWindow(deliveryDay);
+  const prevDelivery = new Date(delivery);
+  prevDelivery.setDate(prevDelivery.getDate() - 7);
+  return cutoffFor(deliveryDay, prevDelivery);
+}
+
+function hasMissedCutoff(loc) {
+  const msPerDay = 86400000;
+  const validOrders = loc.items.map(i => i.lastOrder).filter(Boolean);
+  if (!validOrders.length) return false;
+  const lastOrder = validOrders.reduce((a, b) => b > a ? b : a);
+  const daysSince = Math.floor((TODAY - lastOrder) / msPerDay);
+  if (daysSince >= 14) return false; // Overdue territory — omit
+  const lastCutoff = getLastPassedCutoff(loc.deliveryDay);
+  return lastOrder < lastCutoff;
 }
 
 // ------------------------------------------------------------------
@@ -1237,7 +1258,8 @@ function renderAtomicByAccount() {
     const delivDays  = [...new Set(blockSums.map(s => s.loc.deliveryDay))]
       .map(d => d[0].toUpperCase() + d.slice(1, 3)).join(', ');
 
-    const parentRow = `<tr class="row-parent${showExpandable ? ' collapsible collapsed' : ''}${atRiskCls}" data-cid="${blockCid}" data-atype="${atype}" data-company="${company.name.toLowerCase()}" ${showExpandable ? `onclick="toggleCompany(this)"` : ''}>
+    const blockMissed = blockSums.some(s => hasMissedCutoff(s.loc));
+    const parentRow = `<tr class="row-parent${showExpandable ? ' collapsible collapsed' : ''}${atRiskCls}" data-cid="${blockCid}" data-atype="${atype}" data-missed="${blockMissed}" data-company="${company.name.toLowerCase()}" ${showExpandable ? `onclick="toggleCompany(this)"` : ''}>
       <td>${chevron}${company.name}${label ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${label}</span>` : ''}</td>
       <td>${delivDays}</td>
       <td>${fmtLastOrder(bLastOrder, bDaysSince)}</td>
@@ -1249,7 +1271,8 @@ function renderAtomicByAccount() {
 
     const childRows = showExpandable ? [...blockSums].sort((a, b) => b.totalLbs - a.totalLbs)
       .map(({ loc, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => {
-        return `<tr class="row-child" data-parent-cid="${blockCid}" data-atype="${atype}" data-company="${company.name.toLowerCase()}" style="display:none">
+        const childMissed = hasMissedCutoff(loc);
+        return `<tr class="row-child" data-parent-cid="${blockCid}" data-atype="${atype}" data-missed="${childMissed}" data-company="${company.name.toLowerCase()}" style="display:none">
           <td>${loc.name}</td>
           <td style="text-transform:capitalize">${loc.deliveryDay}</td>
           <td>${fmtLastOrder(lLast, lDays)}</td>
@@ -1304,12 +1327,15 @@ function filterAccountType(type, btn) {
   document.querySelectorAll('.account-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   document.querySelectorAll('#atomic-tbody tr').forEach(row => {
-    const rowType = row.dataset.atype;
-    const matches = rowType === type;
+    const isMissedTab = type === 'missed-cutoff';
+    const matches = isMissedTab ? row.dataset.missed === 'true' : row.dataset.atype === type;
     if (matches) {
       if (row.classList.contains('row-child')) {
-        const parent = document.querySelector(`tr.row-parent[data-cid="${row.dataset.parentCid}"]`);
-        row.style.display = (parent && parent.classList.contains('collapsed')) ? 'none' : '';
+        // For missed-cutoff tab: show child rows directly (no collapse nesting)
+        row.style.display = isMissedTab ? '' : (() => {
+          const parent = document.querySelector(`tr.row-parent[data-cid="${row.dataset.parentCid}"]`);
+          return (parent && parent.classList.contains('collapsed')) ? 'none' : '';
+        })();
       } else {
         row.style.display = '';
       }

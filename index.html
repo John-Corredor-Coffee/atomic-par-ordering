@@ -713,7 +713,6 @@ function hasMissedCutoff(loc) {
   // Parse as local noon to get accurate daysSince
   const lastOrder = new Date(lastOrderStr + 'T12:00:00');
   const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
-  if (daysSince === 0) return false;  // Ordered today — they're good
   if (daysSince >= 14) return false;  // Overdue territory — omit
   const lastCutoff = getLastPassedCutoff(loc.deliveryDay);
   // An order placed BEFORE the cutoff was placed ON TIME for that cycle.

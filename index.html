@@ -711,7 +711,8 @@ function hasMissedCutoff(loc) {
   if (!validOrders.length) return false;
   const lastOrder = validOrders.reduce((a, b) => b > a ? b : a);
   const daysSince = Math.floor((TODAY - lastOrder) / msPerDay);
-  if (daysSince >= 14) return false; // Overdue territory — omit
+  if (daysSince === 0) return false;  // Ordered today — they're good
+  if (daysSince >= 14) return false;  // Overdue territory — omit
   const lastCutoff = getLastPassedCutoff(loc.deliveryDay);
   return lastOrder < lastCutoff;
 }

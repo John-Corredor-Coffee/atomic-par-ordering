@@ -706,15 +706,23 @@ function getLastPassedCutoff(deliveryDay) {
 }
 
 function hasMissedCutoff(loc) {
-  const msPerDay = 86400000;
-  const validOrders = loc.items.map(i => i.lastOrder).filter(Boolean);
-  if (!validOrders.length) return false;
-  const lastOrder = validOrders.reduce((a, b) => b > a ? b : a);
-  const daysSince = Math.floor((TODAY - lastOrder) / msPerDay);
+  // Use lastOrderDate strings to avoid UTC-vs-local timezone issues.
+  const validDates = loc.items.map(i => i.lastOrderDate).filter(Boolean);
+  if (!validDates.length) return false;
+  const lastOrderStr = validDates.reduce((a, b) => b > a ? b : a); // YYYY-MM-DD
+  // Parse as local noon to get accurate daysSince
+  const lastOrder = new Date(lastOrderStr + 'T12:00:00');
+  const daysSince = Math.floor((TODAY - lastOrder) / 86400000);
   if (daysSince === 0) return false;  // Ordered today — they're good
   if (daysSince >= 14) return false;  // Overdue territory — omit
   const lastCutoff = getLastPassedCutoff(loc.deliveryDay);
-  return lastOrder < lastCutoff;
+  // An order placed BEFORE the cutoff was placed ON TIME for that cycle.
+  // The order window opens 7 days before the cutoff.
+  // Missed = no order in [windowOpen, lastCutoff], i.e. lastOrder <= windowOpen.
+  const windowOpen = new Date(lastCutoff);
+  windowOpen.setDate(windowOpen.getDate() - 7);
+  const windowOpenStr = windowOpen.toLocaleDateString('en-CA'); // YYYY-MM-DD
+  return lastOrderStr <= windowOpenStr;
 }
 
 // ------------------------------------------------------------------

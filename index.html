@@ -707,7 +707,8 @@ function getLastPassedCutoff(deliveryDay) {
 
 function hasMissedCutoff(loc) {
   // Use lastOrderDate strings to avoid UTC-vs-local timezone issues.
-  const validDates = loc.items.map(i => i.lastOrderDate).filter(Boolean);
+  // Exclude units (non-consumables like table tents, cords) — same filter as the rest of the tool.
+  const validDates = loc.items.filter(i => i.usageUnit !== 'units').map(i => i.lastOrderDate).filter(Boolean);
   if (!validDates.length) return false;
   const lastOrderStr = validDates.reduce((a, b) => b > a ? b : a); // YYYY-MM-DD
   // Parse as local noon to get accurate daysSince

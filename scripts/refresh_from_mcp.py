@@ -116,12 +116,15 @@ def get_lr_group_sku(sku, name, lr_skus):
     return 'LR-5LB'       # fallback
 
 
-def skip_sku(sku, name, brew_tag_skus=None):
+def skip_sku(sku, name, brew_tag_skus=None, lr_skus=None):
     if not sku:
         return True
     # Phase 2: always exclude Brew Tag Label products
     if brew_tag_skus and sku in brew_tag_skus:
         return True
+    # Phase 2: LR SKUs are explicitly allowed even if prefix matches SKIP_PREFIXES
+    if lr_skus and sku in lr_skus:
+        return False
     if sku in CONSUMABLE_SKUS:
         return False
     up = sku.upper()
@@ -197,7 +200,7 @@ def build_last_lookup(rows, lr_skus=None, brew_tag_skus=None):
             qty = 0
         if not cname or cname in INTERNAL_NAMES or not sku or qty == 0 or not date_str:
             continue
-        if skip_sku(sku, name, brew_tag_skus):
+        if skip_sku(sku, name, brew_tag_skus, lr_skus):
             continue
         effective_sku = get_lr_group_sku(sku, name, lr_skus) or sku
         key = (cname, lname, effective_sku)
@@ -220,7 +223,7 @@ def build_yoy_lookup(rows, lr_skus=None, brew_tag_skus=None):
             qty = 0
         if not cname or cname in INTERNAL_NAMES or not sku or qty == 0:
             continue
-        if skip_sku(sku, name, brew_tag_skus):
+        if skip_sku(sku, name, brew_tag_skus, lr_skus):
             continue
         effective_sku = get_lr_group_sku(sku, name, lr_skus) or sku
         key = (cname, lname, effective_sku)
@@ -267,7 +270,7 @@ def aggregate(rows_60d, rows_w3l, rows_w3p, rows_ly_w3l, rows_ly_w3p,
                 qty = 0
             if not cname or cname in INTERNAL_NAMES or not sku or qty == 0:
                 continue
-            if skip_sku(sku, name, brew_tag_skus):
+            if skip_sku(sku, name, brew_tag_skus, lr_skus):
                 continue
             # Phase 2: remap LR SKUs to group SKU
             group_sku = get_lr_group_sku(sku, name, lr_skus)

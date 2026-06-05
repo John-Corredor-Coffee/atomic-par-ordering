@@ -347,6 +347,15 @@
     }
     .onhand-btn:hover { background: #e0e0e0; }
     .onhand-btn:active { background: #ccc; }
+    .onhand-save-btn {
+      margin-left: 6px; padding: 3px 10px; font-size: 11px; font-weight: 600;
+      background: #10b981; color: white; border: none; border-radius: 4px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .onhand-save-btn:hover { background: #059669; }
+    .onhand-save-btn:disabled { background: #aaa; cursor: default; }
+    .onhand-save-btn.saved { background: #6b7280; }
+    .onhand-save-btn.error { background: #ef4444; }
 
     @media (max-width: 680px) {
       nav { padding: 0 16px; }
@@ -596,6 +605,9 @@ let COMPANIES = [];
 
 let currentCompanyId = 0;
 let currentLocationId = 0;
+
+// Phase 2 — Apps Script endpoint for persisting on-hand data
+const PHASE2_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyUhpWNe0dj8f8qOYn26W2NKVVoO9Tl2Wi1JkJSWrP26cNKTTzjKdIcrhqLoBCf7jXiQA/exec';
 
 // Keyed by "companyId-locationId-itemIdx"
 const edited = {};
@@ -906,6 +918,7 @@ function renderClient(companyId, locationId) {
           <button class="onhand-btn" onclick="adjustOnHand('${key}', 1, ${onHandStep(item)}, this)">+</button>
           <span class="onhand-unit">${item.usageUnit}</span>
           <span class="data-tag ${isEdited ? 'tag-corrected' : isStale ? 'tag-stale' : 'tag-predicted'}">${isEdited ? 'corrected' : isStale ? 'stale' : 'predicted'}</span>
+          ${isEdited ? `<button class="onhand-save-btn" id="save-btn-${key}" onclick="saveOnHandToSheet('${key}', ${companyId}, ${locationId}, '${item.sku}', this)">Save</button>` : ''}
         </div>
       </td>
       <td>
@@ -1041,6 +1054,55 @@ function editOnHand(key, input) {
     isEditingOnHand = true;
     renderClient(currentCompanyId, currentLocationId);
     isEditingOnHand = false;
+  }
+}
+
+async function saveOnHandToSheet(key, companyIdx, locationIdx, sku, btn) {
+  const val = edited[key];
+  if (val === undefined) return;
+
+  const company  = COMPANIES[companyIdx];
+  const loc      = company.locations[locationIdx];
+  const item     = loc.items.find(i => i.sku === sku);
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch(PHASE2_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action:        'writeOnHand',
+        company_id:    company.id   || String(companyIdx),
+        company_name:  company.name,
+        location_id:   loc.id       || String(locationIdx),
+        location_name: loc.name,
+        sku:           sku,
+        on_hand_qty:   val,
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      setTimeout(() => {
+        btn.textContent = 'Save';
+        btn.classList.remove('saved');
+        btn.disabled = false;
+      }, 2500);
+    } else {
+      throw new Error(data.error || 'Unknown error');
+    }
+  } catch (err) {
+    btn.textContent = '✗ Error';
+    btn.classList.add('error');
+    btn.disabled = false;
+    console.error('Phase 2 save error:', err);
+    setTimeout(() => {
+      btn.textContent = 'Save';
+      btn.classList.remove('error');
+    }, 3000);
   }
 }
 

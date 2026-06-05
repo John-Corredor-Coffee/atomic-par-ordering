@@ -356,6 +356,11 @@
     .onhand-save-btn:disabled { background: #aaa; cursor: default; }
     .onhand-save-btn.saved { background: #6b7280; }
     .onhand-save-btn.error { background: #ef4444; }
+    .badge-usage {
+      display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; padding: 1px 5px; border-radius: 3px;
+      background: #dbeafe; color: #1d4ed8; margin-left: 4px; vertical-align: middle;
+    }
 
     @media (max-width: 680px) {
       nav { padding: 0 16px; }
@@ -609,6 +614,11 @@ let currentLocationId = 0;
 // Phase 2 — Apps Script endpoint for persisting on-hand data
 const PHASE2_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyUhpWNe0dj8f8qOYn26W2NKVVoO9Tl2Wi1JkJSWrP26cNKTTzjKdIcrhqLoBCf7jXiQA/exec';
 
+// Phase 2 — Usage Summary cache
+// Keyed by "companyId-locationId-sku" → {avg4w, avg12w, last_on_hand_date, last_on_hand_qty, weeks_since, suggested_order}
+const usageSummary = {};
+let usageSummaryLoading = false;
+
 // Keyed by "companyId-locationId-itemIdx"
 const edited = {};
 
@@ -779,6 +789,49 @@ function recOrders(item, daysUntilDelivery, currentOnHand, daysOpen, safetyDays)
   return Math.ceil(needed / item.unitsPerOrder);
 }
 
+// Phase 2 — load real usage data for a location from the Apps Script endpoint
+async function loadUsageSummary(companyIdx, locationIdx) {
+  const company = COMPANIES[companyIdx];
+  const loc     = company.locations[locationIdx];
+  const cid     = company.id   || String(companyIdx);
+  const lid     = loc.id       || String(locationIdx);
+
+  usageSummaryLoading = true;
+  try {
+    const url = `${PHASE2_ENDPOINT}?company_id=${encodeURIComponent(cid)}&location_id=${encodeURIComponent(lid)}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (data.ok && data.items && data.items.length > 0) {
+      data.items.forEach(item => {
+        const key = `${companyIdx}-${locationIdx}-${item.sku}`;
+        usageSummary[key] = item;
+      });
+      // Re-render with real usage data now loaded
+      renderClient(companyIdx, locationIdx);
+    }
+  } catch (err) {
+    console.warn('Phase 2 usage summary fetch failed:', err);
+  } finally {
+    usageSummaryLoading = false;
+  }
+}
+
+// Phase 2 — return real weekly usage rate (bags/week) if available, else null
+function phase2WeeklyUsage(key) {
+  const s = usageSummary[key];
+  if (!s || s.avg4w === '' || s.avg4w === null || s.avg4w === undefined) return null;
+  const weeks = parseInt(s.weeks_since);
+  if (!isNaN(weeks) && weeks >= 4) return null; // expired — fall back to order-inferred
+  return parseFloat(s.avg4w);
+}
+
+// Phase 2 — effective daily rate: use real usage avg when available, else order-inferred
+function effectiveDailyP2(item, key) {
+  const weeklyUsage = phase2WeeklyUsage(key);
+  if (weeklyUsage !== null) return weeklyUsage / 7;
+  return effectiveDaily(item);
+}
+
 // ------------------------------------------------------------------
 // FORMATTING
 // ------------------------------------------------------------------
@@ -888,13 +941,18 @@ function renderClient(companyId, locationId) {
     const key = `${companyId}-${locationId}-${item.sku}`;
     const isEdited = edited[key] !== undefined;
     const onHand = isEdited ? edited[key] : defaultOnHand(item);
-    const daily = effectiveDaily(item);
+    const weeklyUsage = phase2WeeklyUsage(key);
+    const isUsageBased = weeklyUsage !== null;
+    const daily = effectiveDailyP2(item, key);
     const safetyStock = daily * safetyOf(loc);
     const parTarget = calcPAR(item, daysUntil, daysOpenOf(loc), safetyOf(loc));
     const orders = recOrders(item, daysUntil, onHand, daysOpenOf(loc), safetyOf(loc));
     const weightedGrowth = 0.7 * item.yoy + 0.3 * item.w3;
     const orderLabel = orders !== 1 ? item.orderUnit + 's' : item.orderUnit;
     const showSub = orders > 0 && item.unitsPerOrder > 1;
+    const dailyBadge = isUsageBased
+      ? ' <span class="badge-usage" title="Based on real on-hand usage data">usage</span>'
+      : item.benchmarkSeeded ? ' <span class="badge-est" title="Estimated from similar accounts — not enough order history yet">est.</span>' : '';
     const tr = document.createElement('tr');
     if (extraClass) tr.className = extraClass;
     tr.dataset.rowKey = item.sku;
@@ -903,7 +961,7 @@ function renderClient(companyId, locationId) {
         <div class="item-name">${item.name}</div>
         <div class="item-sku">${item.sku}</div>
       </td>
-      <td>${daily.toFixed(1)} ${item.usageUnit}/day${item.benchmarkSeeded ? ' <span class="badge-est" title="Estimated from similar accounts — not enough order history yet">est.</span>' : ''}</td>
+      <td>${daily.toFixed(1)} ${item.usageUnit}/day${dailyBadge}</td>
       <td>${safetyStock.toFixed(1)} ${item.usageUnit}</td>
       <td><strong>${parTarget.toFixed(1)} ${item.usageUnit}</strong></td>
       <td>
@@ -1526,11 +1584,13 @@ function switchCompany(id) {
 
   document.getElementById('client-view').classList.remove('hidden');
   renderClient(currentCompanyId, 0);
+  loadUsageSummary(currentCompanyId, 0);
 }
 
 function switchLocation(id) {
   currentLocationId = parseInt(id);
   renderClient(currentCompanyId, currentLocationId);
+  loadUsageSummary(currentCompanyId, currentLocationId);
 }
 
 // ── DATA LOADING ──────────────────────────────────────────────────────────────

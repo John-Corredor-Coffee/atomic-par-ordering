@@ -63,9 +63,64 @@ CONSUMABLE_SKUS = {
     'MF-CHAI', 'MF-OAT', 'SMITH-WS-PMTCH',
 }
 
+# ── PHASE 2: Limited Release group SKUs ──────────────────────────────────────
+# LR SKUs from the Shopify "Limited Release" collection are grouped by format
+# instead of tracked individually (since specific coffees rotate).
+# Brew Tag Label products are excluded entirely.
+LR_GROUP_NAMES = {
+    'LR-2LB': 'Limited Release (2lb bag)',
+    'LR-5LB': 'Limited Release (5lb bag)',
+    'LR-RC':  'Limited Release (Retail Case)',
+}
 
-def skip_sku(sku, name):
+
+def load_lr_skus(path):
+    """Load set of SKUs in the Shopify 'Limited Release' collection (brew tag already excluded).
+    Expected file format: {"skus": ["SKU1", "SKU2", ...]}
+    Returns empty set if file not provided or missing.
+    """
+    if not path or not Path(path).exists():
+        return set()
+    data = json.loads(Path(path).read_text())
+    skus = set(data.get('skus', []))
+    print(f"  Limited Release SKUs loaded: {len(skus)}")
+    return skus
+
+
+def load_brew_tag_skus(path):
+    """Load set of SKUs tagged 'Brew Tag Label' in Shopify.
+    Expected file format: {"skus": ["SKU1", "SKU2", ...]}
+    Returns empty set if file not provided or missing.
+    """
+    if not path or not Path(path).exists():
+        return set()
+    data = json.loads(Path(path).read_text())
+    skus = set(data.get('skus', []))
+    print(f"  Brew Tag Label SKUs loaded (will be excluded): {len(skus)}")
+    return skus
+
+
+def get_lr_group_sku(sku, name, lr_skus):
+    """If SKU belongs to the Limited Release collection, return its group SKU.
+    Returns None if not an LR SKU.
+    """
+    if not lr_skus or sku not in lr_skus:
+        return None
+    u, o, upo = classify_sku(sku, name)
+    if u == 'lbs':
+        if o == 'case':
+            return 'LR-RC'
+        if upo == 2:
+            return 'LR-2LB'
+        return 'LR-5LB'   # 5lb bag or unknown size → default to 5lb group
+    return 'LR-5LB'       # fallback
+
+
+def skip_sku(sku, name, brew_tag_skus=None):
     if not sku:
+        return True
+    # Phase 2: always exclude Brew Tag Label products
+    if brew_tag_skus and sku in brew_tag_skus:
         return True
     if sku in CONSUMABLE_SKUS:
         return False
@@ -86,6 +141,10 @@ def skip_sku(sku, name):
 def classify_sku(sku, name):
     up = (sku or '').upper()
     nl = name.lower()
+    # Phase 2: synthetic LR group SKUs
+    if up == 'LR-2LB': return ('lbs', 'bag',  2)
+    if up == 'LR-5LB': return ('lbs', 'bag',  5)
+    if up == 'LR-RC':  return ('lbs', 'case', 4.5)
     if up.endswith('501') or '- 5lb' in nl:
         return ('lbs', 'bag', 5)
     if up.endswith('201') and not up.endswith('201-D'):
@@ -118,10 +177,12 @@ def load_mcp_file(path):
     return [dict(zip(cols, row)) for row in data['rows']]
 
 
-def build_last_lookup(rows):
+def build_last_lookup(rows, lr_skus=None, brew_tag_skus=None):
     """
     Build {(company, location, sku): (date_str, qty)} from the last-order query rows.
     Rows must be pre-sorted ORDER BY day DESC so the first hit per key = most recent date.
+    LR SKUs are remapped to their group SKU; last-order date for the group = most recent
+    order date across all individual LR coffees in that group for that location.
     """
     lookup = {}
     for row in rows:
@@ -136,15 +197,16 @@ def build_last_lookup(rows):
             qty = 0
         if not cname or cname in INTERNAL_NAMES or not sku or qty == 0 or not date_str:
             continue
-        if skip_sku(sku, name):
+        if skip_sku(sku, name, brew_tag_skus):
             continue
-        key = (cname, lname, sku)
+        effective_sku = get_lr_group_sku(sku, name, lr_skus) or sku
+        key = (cname, lname, effective_sku)
         if key not in lookup:
             lookup[key] = (date_str, qty)
     return lookup
 
 
-def build_yoy_lookup(rows):
+def build_yoy_lookup(rows, lr_skus=None, brew_tag_skus=None):
     """Build {(company, location, sku): total_qty} from the prior-year 21-day window (same as w3l)."""
     lookup = {}
     for row in rows:
@@ -158,9 +220,10 @@ def build_yoy_lookup(rows):
             qty = 0
         if not cname or cname in INTERNAL_NAMES or not sku or qty == 0:
             continue
-        if skip_sku(sku, name):
+        if skip_sku(sku, name, brew_tag_skus):
             continue
-        key = (cname, lname, sku)
+        effective_sku = get_lr_group_sku(sku, name, lr_skus) or sku
+        key = (cname, lname, effective_sku)
         lookup[key] = lookup.get(key, 0) + qty
     return lookup
 
@@ -177,7 +240,8 @@ def load_delivery_days():
 
 
 def aggregate(rows_60d, rows_w3l, rows_w3p, rows_ly_w3l, rows_ly_w3p,
-              rows_w7l, rows_w7p, rows_ly_w7l, rows_ly_w7p, delivery_days):
+              rows_w7l, rows_w7p, rows_ly_w7l, rows_ly_w7p, delivery_days,
+              lr_skus=None, brew_tag_skus=None):
     locs = {}
 
     def ensure(cname, lname):
@@ -203,16 +267,20 @@ def aggregate(rows_60d, rows_w3l, rows_w3p, rows_ly_w3l, rows_ly_w3p,
                 qty = 0
             if not cname or cname in INTERNAL_NAMES or not sku or qty == 0:
                 continue
-            if skip_sku(sku, name):
+            if skip_sku(sku, name, brew_tag_skus):
                 continue
+            # Phase 2: remap LR SKUs to group SKU
+            group_sku = get_lr_group_sku(sku, name, lr_skus)
+            effective_sku  = group_sku or sku
+            effective_name = LR_GROUP_NAMES.get(effective_sku, name)
             loc = ensure(cname, lname)
-            if sku not in loc['skus']:
-                loc['skus'][sku] = {'name': name, 'qty60': 0,
-                                    'qw3l': 0, 'qw3p': 0, 'qly_w3l': 0, 'qly_w3p': 0,
-                                    'qw7l': 0, 'qw7p': 0, 'qly_w7l': 0, 'qly_w7p': 0}
-            loc['skus'][sku][field] += qty
-            if not loc['skus'][sku]['name']:
-                loc['skus'][sku]['name'] = name
+            if effective_sku not in loc['skus']:
+                loc['skus'][effective_sku] = {'name': effective_name, 'qty60': 0,
+                                              'qw3l': 0, 'qw3p': 0, 'qly_w3l': 0, 'qly_w3p': 0,
+                                              'qw7l': 0, 'qw7p': 0, 'qly_w7l': 0, 'qly_w7p': 0}
+            loc['skus'][effective_sku][field] += qty
+            if not loc['skus'][effective_sku]['name']:
+                loc['skus'][effective_sku]['name'] = effective_name
 
     add(rows_60d,    'qty60')
     add(rows_w3l,    'qw3l')
@@ -412,12 +480,15 @@ def build_json(locs, last_lookup, benchmarks, new_companies=None, sku_names=None
 
 
 def main():
-    if len(sys.argv) not in (11, 12):
-        sys.exit("Usage: refresh_from_mcp.py <60d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p> [companies]")
+    if len(sys.argv) not in (11, 12, 13, 14):
+        sys.exit("Usage: refresh_from_mcp.py <60d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p> [companies] [lr_skus] [brew_tag_skus]")
 
     args = sys.argv[1:]
     f60, fw3l, fw3p, flast, fly_w3l, fly_w3p, fw7l, fw7p, fly_w7l, fly_w7p = args[:10]
-    fcompanies = args[10] if len(args) == 11 else None
+    fcompanies    = args[10] if len(args) >= 11 else None
+    flr_skus      = args[11] if len(args) >= 12 else None
+    fbrew_tag     = args[12] if len(args) >= 13 else None
+
     print("Loading MCP result files...")
     rows_60d    = load_mcp_file(f60)
     rows_w3l    = load_mcp_file(fw3l)
@@ -433,14 +504,19 @@ def main():
           f"ly_w3l:{len(rows_ly_w3l)} ly_w3p:{len(rows_ly_w3p)} "
           f"w7l:{len(rows_w7l)} w7p:{len(rows_w7p)} ly_w7l:{len(rows_ly_w7l)} ly_w7p:{len(rows_ly_w7p)}")
 
+    # Phase 2: load LR collection and Brew Tag exclusion lists
+    lr_skus       = load_lr_skus(flr_skus)
+    brew_tag_skus = load_brew_tag_skus(fbrew_tag)
+
     delivery_days = load_delivery_days()
     print(f"  Delivery day lookup: {len(delivery_days)} locations")
 
-    last_lookup = build_last_lookup(rows_last)
+    last_lookup = build_last_lookup(rows_last, lr_skus, brew_tag_skus)
     print(f"  Last-order lookup: {len(last_lookup)} SKUs")
 
     locs = aggregate(rows_60d, rows_w3l, rows_w3p, rows_ly_w3l, rows_ly_w3p,
-                     rows_w7l, rows_w7p, rows_ly_w7l, rows_ly_w7p, delivery_days)
+                     rows_w7l, rows_w7p, rows_ly_w7l, rows_ly_w7p, delivery_days,
+                     lr_skus, brew_tag_skus)
     benchmarks = compute_benchmarks(locs)
     print(f"  Independent benchmarks: {len(benchmarks)} SKUs")
     sku_names = collect_sku_names(locs)

@@ -693,6 +693,7 @@ function colVal(row, col) {
   const S = { 'Overdue': 0, 'Cutoff Soon': 1, 'On Track': 2 };
   switch (col) {
     case 'totalLbs':    return row.totalLbs;
+    case 'weeklyLbs':   return row.weeklyLbs;
     case 'yoy':         return row.avgYoy;
     case 'w3':          return row.avgW3;
     case 'lastOrder':   return row.lastOrder ? +row.lastOrder : null;
@@ -1287,6 +1288,7 @@ function renderAdmin(companyId) {
     thSort('Delivery Day', 'deliveryDay') +
     thSort('Last Order', 'lastOrder') +
     thSort('Cutoff', 'cutoff') +
+    thSort('Est Weekly Use (lbs)', 'weeklyLbs') +
     thSort('Predicted Vol. (lbs)', 'totalLbs') +
     thSort('YoY Trend', 'yoy') +
     thSort('3-Wk Trend', 'w3') +
@@ -1305,16 +1307,19 @@ function renderAdmin(companyId) {
     const totalLbs = loc.items
       .filter(i => i.usageUnit === 'lbs')
       .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
+    const weeklyLbs = loc.items
+      .filter(i => i.usageUnit === 'lbs')
+      .reduce((s, item) => s + item.avgDaily * 7, 0);
     const activeItems = loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0 || i.qw3l > 0 || i.qw3p > 0));
     const avgYoy = activeItems.length ? activeItems.reduce((s, i) => s + i.yoy, 0) / activeItems.length : 0;
     const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
     const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
     const lastOrder = validOrders.length ? validOrders.reduce((a, b) => b > a ? b : a) : null;
     const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : null;
-    return { loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince };
+    return { loc, cutoff, hours, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince };
   }));
 
-  rows.forEach(({ loc, cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince }) => {
+  rows.forEach(({ loc, cutoff, hours, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince }) => {
     let status, dotClass;
     if (lastOrder && daysSince > 21)   { status = 'Overdue';     dotClass = 'dot-red'; }
     else if (hours <= 24 && hours > 0) { status = 'Cutoff Soon'; dotClass = 'dot-amber'; }
@@ -1327,6 +1332,7 @@ function renderAdmin(companyId) {
       <td style="text-transform:capitalize">${loc.deliveryDay}</td>
       <td>${fmtLastOrder(lastOrder, daysSince)}</td>
       <td>${fmt(cutoff)}, 11:59 PM</td>
+      <td>${fmtLbs(weeklyLbs)}</td>
       <td><strong>${fmtLbs(totalLbs)}</strong></td>
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy * 100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3 * 100).toFixed(1)}%</span></td>
@@ -1373,6 +1379,9 @@ function locationSummary(loc) {
   const totalLbs = loc.items
     .filter(i => i.usageUnit === 'lbs')
     .reduce((s, item) => s + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
+  const weeklyLbs = loc.items
+    .filter(i => i.usageUnit === 'lbs')
+    .reduce((s, item) => s + item.avgDaily * 7, 0);
   const activeItems = loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0 || i.qw3l > 0 || i.qw3p > 0));
   const avgYoy = activeItems.length ? activeItems.reduce((s, i) => s + i.yoy, 0) / activeItems.length : 0;
   const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
@@ -1383,7 +1392,7 @@ function locationSummary(loc) {
   if (lastOrder && daysSince > 21)   { status = 'Overdue';     dotClass = 'dot-red'; }
   else if (hours <= 24 && hours > 0) { status = 'Cutoff Soon'; dotClass = 'dot-amber'; }
   else                               { status = 'On Track';    dotClass = 'dot-green'; }
-  return { cutoff, hours, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass };
+  return { cutoff, hours, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass };
 }
 
 function renderAtomicByLocation() {
@@ -1393,6 +1402,7 @@ function renderAtomicByLocation() {
     `<th>Location</th>` +
     thSort('Delivery Day', 'deliveryDay') +
     thSort('Last Order', 'lastOrder') +
+    thSort('Est Weekly Use (lbs)', 'weeklyLbs') +
     thSort('Predicted Vol. (lbs)', 'totalLbs') +
     thSort('YoY Trend', 'yoy') +
     thSort('3-Wk Trend', 'w3') +
@@ -1403,13 +1413,14 @@ function renderAtomicByLocation() {
     return { company, loc, ...s };
   }));
 
-  document.getElementById('atomic-tbody').innerHTML = rows.map(({ company, loc, cutoff, totalLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => {
+  document.getElementById('atomic-tbody').innerHTML = rows.map(({ company, loc, cutoff, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => {
     const atRisk = lastOrder && daysSince >= 30;
     return `<tr${atRisk ? ' class="row-at-risk"' : ''} data-company="${company.name.toLowerCase()}">
       <td style="color:rgba(0,0,0,0.45);font-size:13px">${company.name}</td>
       <td><strong>${loc.name}</strong></td>
       <td style="text-transform:capitalize">${loc.deliveryDay}</td>
       <td>${fmtLastOrder(lastOrder, daysSince)}</td>
+      <td>${fmtLbs(weeklyLbs)}</td>
       <td><strong>${fmtLbs(totalLbs)}</strong></td>
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
@@ -1424,6 +1435,7 @@ function renderAtomicByAccount() {
     thSort('Account', 'name') +
     thSort('Delivery Day', 'deliveryDay') +
     thSort('Last Order', 'lastOrder') +
+    thSort('Est Weekly Use (lbs)', 'weeklyLbs') +
     thSort('Predicted Vol. (lbs)', 'totalLbs') +
     thSort('YoY Trend', 'yoy') +
     thSort('3-Wk Trend', 'w3') +
@@ -1432,7 +1444,8 @@ function renderAtomicByAccount() {
   const companies = COMPANIES.filter(c => !c.isInternal);
   const rows = applySortRows(companies.map(company => {
     const summaries = company.locations.map(loc => ({ loc, ...locationSummary(loc) }));
-    const totalLbs = summaries.reduce((s, r) => s + r.totalLbs, 0);
+    const totalLbs  = summaries.reduce((s, r) => s + r.totalLbs,  0);
+    const weeklyLbs = summaries.reduce((s, r) => s + r.weeklyLbs, 0);
     const avgYoy   = summaries.reduce((s, r) => s + r.avgYoy, 0) / summaries.length;
     const avgW3    = summaries.reduce((s, r) => s + r.avgW3,  0) / summaries.length;
     const validLastOrders = summaries.map(r => r.lastOrder).filter(Boolean);
@@ -1454,7 +1467,8 @@ function renderAtomicByAccount() {
     const bLastOrders = blockSums.map(s => s.lastOrder).filter(Boolean);
     const bLastOrder  = bLastOrders.length ? bLastOrders.reduce((a, b) => b > a ? b : a) : null;
     const bDaysSince  = bLastOrder ? Math.floor((TODAY - bLastOrder) / 86400000) : null;
-    const bTotalLbs   = blockSums.reduce((s, r) => s + r.totalLbs, 0);
+    const bTotalLbs   = blockSums.reduce((s, r) => s + r.totalLbs,  0);
+    const bWeeklyLbs  = blockSums.reduce((s, r) => s + r.weeklyLbs, 0);
     const bAvgYoy     = blockSums.reduce((s, r) => s + r.avgYoy, 0) / blockSums.length;
     const bAvgW3      = blockSums.reduce((s, r) => s + r.avgW3,  0) / blockSums.length;
     const bWorst = blockSums.find(r => r.status === 'Overdue') ? 'Overdue'
@@ -1471,6 +1485,7 @@ function renderAtomicByAccount() {
       <td>${chevron}${company.name}${label ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${label}</span>` : ''}</td>
       <td>${delivDays}</td>
       <td>${fmtLastOrder(bLastOrder, bDaysSince)}</td>
+      <td>${fmtLbs(bWeeklyLbs)}</td>
       <td><strong>${fmtLbs(bTotalLbs)}</strong></td>
       <td><span class="trend-pill ${trendClass(bAvgYoy)}">${trendArrow(bAvgYoy)} ${(bAvgYoy*100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(bAvgW3)}">${trendArrow(bAvgW3)} ${(bAvgW3*100).toFixed(1)}%</span></td>
@@ -1478,12 +1493,13 @@ function renderAtomicByAccount() {
     </tr>`;
 
     const childRows = showExpandable ? [...blockSums].sort((a, b) => b.totalLbs - a.totalLbs)
-      .map(({ loc, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => {
+      .map(({ loc, weeklyLbs: lWeekly, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => {
         const childMissed = hasMissedCutoff(loc);
         return `<tr class="row-child" data-parent-cid="${blockCid}" data-atype="${atype}" data-missed="${childMissed}" data-company="${company.name.toLowerCase()}" style="display:none">
           <td>${loc.name}</td>
           <td style="text-transform:capitalize">${loc.deliveryDay}</td>
           <td>${fmtLastOrder(lLast, lDays)}</td>
+          <td>${fmtLbs(lWeekly)}</td>
           <td>${fmtLbs(lLbs)}</td>
           <td><span class="trend-pill ${trendClass(lYoy)}">${trendArrow(lYoy)} ${(lYoy*100).toFixed(1)}%</span></td>
           <td><span class="trend-pill ${trendClass(lW3)}">${trendArrow(lW3)} ${(lW3*100).toFixed(1)}%</span></td>

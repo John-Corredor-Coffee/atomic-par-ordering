@@ -1249,18 +1249,17 @@ async function saveOnHandToSheet(key, companyIdx, locationIdx, sku, btn) {
 // ------------------------------------------------------------------
 function renderAdmin(companyId) {
   const company = COMPANIES[companyId];
-  let totalPredLbs = 0, yoySum = 0, itemCount = 0;
+  let yoySum = 0, itemCount = 0;
 
   company.locations.forEach(loc => {
-    const { delivery } = getDeliveryWindow(loc.deliveryDay);
-    const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
     loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0 || i.qw3l > 0 || i.qw3p > 0)).forEach(item => {
-      const orders = recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc));
-      if (item.usageUnit === 'lbs') totalPredLbs += orders * item.unitsPerOrder;
       yoySum += item.yoy;
       itemCount++;
     });
   });
+
+  const weeklyLbs = company.locations.flatMap(loc => loc.items.filter(i => i.usageUnit === 'lbs'))
+    .reduce((s, i) => s + i.avgDaily * 7, 0);
 
   const avgYoy = yoySum / itemCount;
   const locCount = company.locations.length;
@@ -1272,8 +1271,8 @@ function renderAdmin(companyId) {
       <div class="stat-sub">${company.name}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Predicted Coffee This Week</div>
-      <div class="stat-value">${totalPredLbs.toFixed(0)} lbs</div>
+      <div class="stat-label">Est Weekly Usage</div>
+      <div class="stat-value">${weeklyLbs.toFixed(0)} lbs</div>
       <div class="stat-sub">Coffee only — across all locations</div>
     </div>
     <div class="stat-card">
@@ -1576,13 +1575,8 @@ function toggleCompany(parentTr) {
 
 function renderAtomicSummary() {
   const locs = allLocations();
-  const totalLbs = locs.reduce((s, { loc }) => {
-    const { delivery } = getDeliveryWindow(loc.deliveryDay);
-    const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
-    return s + loc.items.filter(i => i.usageUnit === 'lbs').reduce((ss, item) =>
-      ss + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
-  }, 0);
   const beanItems = locs.flatMap(({ loc }) => loc.items.filter(i => i.usageUnit === 'lbs'));
+  const totalLbs  = beanItems.reduce((s, i) => s + i.avgDaily * 7, 0);
   const totalW3l   = beanItems.reduce((s, i) => s + (i.qw3l   || 0), 0);
   const totalLyW3l = beanItems.reduce((s, i) => s + (i.qly_w3l || 0), 0);
   const portfolioYoy = totalLyW3l > 0 ? (totalW3l - totalLyW3l) / totalLyW3l : 0;
@@ -1595,7 +1589,7 @@ function renderAtomicSummary() {
       <div class="stat-sub">${locs.length} total location${locs.length !== 1 ? 's' : ''}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Predicted Coffee This Week</div>
+      <div class="stat-label">Est Weekly Usage</div>
       <div class="stat-value">${totalLbs.toFixed(0)} lbs</div>
       <div class="stat-sub">Coffee only — all accounts</div>
     </div>
@@ -1879,12 +1873,8 @@ function renderSummaryStrip() {
   if (!strip) return;
 
   const locs = allLocations();
-  const totalLbs = locs.reduce((s, { loc }) => {
-    const { delivery } = getDeliveryWindow(loc.deliveryDay);
-    const daysUntil = Math.ceil((delivery - TODAY) / (1000 * 60 * 60 * 24));
-    return s + loc.items.filter(i => i.usageUnit === 'lbs').reduce((ss, item) =>
-      ss + recOrders(item, daysUntil, predictOnHand(item), daysOpenOf(loc), safetyOf(loc)) * item.unitsPerOrder, 0);
-  }, 0);
+  const totalLbs = locs.flatMap(({ loc }) => loc.items.filter(i => i.usageUnit === 'lbs'))
+    .reduce((s, i) => s + i.avgDaily * 7, 0);
 
   const overdueCount = locs.filter(({ loc }) => {
     const activeItems = loc.items.filter(i => i.usageUnit !== 'units' && (i.avgDaily > 0 || i.qty60 > 0));
@@ -1926,7 +1916,7 @@ function dismissSummaryStrip() {
   </div>
   <div class="ss-divider"></div>
   <div class="ss-item">
-    <div class="ss-label">Predicted Coffee This Week</div>
+    <div class="ss-label">Est Weekly Usage</div>
     <div class="ss-value" id="ss-lbs">—</div>
   </div>
   <div class="ss-divider"></div>

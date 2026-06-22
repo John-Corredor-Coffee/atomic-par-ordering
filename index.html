@@ -1454,7 +1454,7 @@ function renderAtomicByAccount() {
     const worstStatus = summaries.find(r => r.status === 'Overdue') ? 'Overdue'
       : summaries.find(r => r.status === 'Cutoff Soon') ? 'Cutoff Soon' : 'On Track';
     const dotClass = worstStatus === 'Overdue' ? 'dot-red' : worstStatus === 'Cutoff Soon' ? 'dot-amber' : 'dot-green';
-    return { company, summaries, totalLbs, avgYoy, avgW3, lastOrder, daysSince, worstStatus, dotClass };
+    return { company, summaries, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince, worstStatus, dotClass };
   }));
 
   // Build a parent+children block for one subset of a company's locations.

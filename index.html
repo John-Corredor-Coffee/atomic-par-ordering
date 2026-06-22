@@ -199,6 +199,12 @@
 
     /* ── TABLE ── */
     table { width: 100%; border-collapse: collapse; }
+    /* Hide Est Weekly Use (col 4) + Predicted Vol. (col 5) on the Needs Review tab.
+       Only ever set in the By Account view, where those are columns 4 & 5. */
+    #atomic-thead.hide-usage th:nth-child(4),
+    #atomic-thead.hide-usage th:nth-child(5),
+    #atomic-tbody.hide-usage td:nth-child(4),
+    #atomic-tbody.hide-usage td:nth-child(5) { display: none; }
     th {
       padding: 12px 24px;
       text-align: left;
@@ -683,6 +689,9 @@ const sortState    = { col: 'totalLbs', dir: -1 };
 const parSortState = { col: null, dir: -1 };
 let parRowOrder    = [];   // locked row order while editing on-hand
 let isEditingOnHand = false;
+// Needs Review tab: grouped by company by default; once the user sorts a column
+// it de-nests into a flat, sorted list of the individual needs-review locations.
+let needsReviewFlat = false;
 
 function thSort(label, col) {
   const active = sortState.col === col;
@@ -727,6 +736,9 @@ function applySortRows(rows) {
 function sortTable(col) {
   sortState.dir = sortState.col === col ? -sortState.dir : (col === 'deliveryDay' ? 1 : -1);
   sortState.col = col;
+  // Sorting while on the Needs Review tab de-nests it into a flat location list.
+  const activeTab = document.querySelector('.account-tab.active');
+  if (activeTab && activeTab.dataset.filter === 'needs-review') needsReviewFlat = true;
   document.getElementById('atomic-card-hint').textContent = '';
   if (!document.getElementById('atomic-view').classList.contains('hidden')) {
     if (document.getElementById('btn-by-account').classList.contains('active')) renderAtomicByAccount();
@@ -1353,8 +1365,7 @@ function filterAtomicRows(query) {
   const q = query.trim().toLowerCase();
   if (!q) {
     const activeTab = document.querySelector('.account-tab.active');
-    filterAccountType(activeTab ? activeTab.dataset.filter : 'group',
-                      activeTab || document.querySelector('.account-tab'));
+    applyAccountFilter(activeTab ? activeTab.dataset.filter : 'group');
     return;
   }
   document.querySelectorAll('#atomic-tbody tr').forEach(tr => {
@@ -1397,6 +1408,9 @@ function locationSummary(loc) {
 
 function renderAtomicByLocation() {
   document.getElementById('atomic-card-title').textContent = 'All Locations';
+  // By Location has a different column layout — never hide usage columns here.
+  document.getElementById('atomic-thead').classList.remove('hide-usage');
+  document.getElementById('atomic-tbody').classList.remove('hide-usage');
   document.getElementById('atomic-thead').innerHTML =
     thSort('Account', 'name') +
     `<th>Location</th>` +
@@ -1524,7 +1538,8 @@ function renderAtomicByAccount() {
       { sums: activeSums, atype: isMulti ? 'group' : 'independent', key: 'active', noun: 'active' },
       { sums: reviewSums, atype: 'needs-review',                    key: 'review', noun: 'needs-review' },
       { sums: newSums,    atype: 'new',                             key: 'new',    noun: 'new' },
-    ].filter(g => g.sums.length);
+      // When flattening, the needs-review block is rendered separately (de-nested).
+    ].filter(g => g.sums.length && !(needsReviewFlat && g.key === 'review'));
 
     const split = groups.length > 1;   // company spans more than one status
     return groups.map(g => {
@@ -1536,16 +1551,53 @@ function renderAtomicByAccount() {
     }).join('');
   };
 
-  document.getElementById('atomic-tbody').innerHTML = rows.map(buildRow).join('');
+  // De-nested Needs Review row: one flat, top-level row per needs-review location.
+  const buildFlatNeedsReviewRow = ({ company, loc, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => {
+    const missed   = hasMissedCutoff(loc);
+    const locLabel = loc.name && loc.name !== company.name
+      ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${loc.name}</span>` : '';
+    const dd = loc.deliveryDay ? loc.deliveryDay[0].toUpperCase() + loc.deliveryDay.slice(1, 3) : '';
+    return `<tr class="row-parent" data-atype="needs-review" data-missed="${missed}" data-company="${company.name.toLowerCase()}">
+      <td>${company.name}${locLabel}</td>
+      <td>${dd}</td>
+      <td>${fmtLastOrder(lastOrder, daysSince)}</td>
+      <td>${fmtLbs(weeklyLbs)}</td>
+      <td><strong>${fmtLbs(totalLbs)}</strong></td>
+      <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
+      <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
+      <td><span class="status-dot ${dotClass}"></span>${status}</td>
+    </tr>`;
+  };
+
+  let html = rows.map(buildRow).join('');
+  if (needsReviewFlat) {
+    const nrLocs = [];
+    companies.forEach(c => c.locations.forEach(loc => {
+      if (loc.reviewStatus === 'needs-review') nrLocs.push({ company: c, loc, ...locationSummary(loc) });
+    }));
+    html += applySortRows(nrLocs).map(buildFlatNeedsReviewRow).join('');
+  }
+
+  document.getElementById('atomic-tbody').innerHTML = html;
   document.getElementById('account-type-tabs').style.display = '';
   const activeTab = document.querySelector('.account-tab.active');
-  filterAccountType(activeTab ? activeTab.dataset.filter : 'group',
-                    activeTab || document.querySelector('.account-tab'));
+  applyAccountFilter(activeTab ? activeTab.dataset.filter : 'group');
 }
 
+// User clicked an account-type tab: return to the default grouped view, then render.
 function filterAccountType(type, btn) {
   document.querySelectorAll('.account-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  needsReviewFlat = false;
+  renderAtomicByAccount();
+}
+
+// Apply the current tab's visibility + column rules (no re-render). Called by render.
+function applyAccountFilter(type) {
+  // Needs Review tab hides the Est Weekly Use + Predicted Vol. columns.
+  const hideUsage = type === 'needs-review';
+  document.getElementById('atomic-thead').classList.toggle('hide-usage', hideUsage);
+  document.getElementById('atomic-tbody').classList.toggle('hide-usage', hideUsage);
   document.querySelectorAll('#atomic-tbody tr').forEach(row => {
     const isMissedTab = type === 'missed-cutoff';
     const matches = isMissedTab ? row.dataset.missed === 'true' : row.dataset.atype === type;
@@ -1602,6 +1654,7 @@ function setAtomicView(view, btn) {
   btn.classList.add('active');
   const s = document.getElementById('atomic-search');
   if (s) s.value = '';
+  needsReviewFlat = false;   // switching views returns Needs Review to grouped default
   renderAtomicSummary();
   if (view === 'account') renderAtomicByAccount();
   else renderAtomicByLocation();

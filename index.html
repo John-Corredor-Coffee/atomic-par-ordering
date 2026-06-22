@@ -564,6 +564,7 @@
             <button class="account-tab active" data-filter="group" onclick="filterAccountType('group', this)">Groups</button>
             <button class="account-tab" data-filter="independent" onclick="filterAccountType('independent', this)">Independent</button>
             <button class="account-tab" data-filter="needs-review" onclick="filterAccountType('needs-review', this)">Needs Review</button>
+            <button class="account-tab" data-filter="new" onclick="filterAccountType('new', this)">New</button>
             <button class="account-tab" data-filter="missed-cutoff" onclick="filterAccountType('missed-cutoff', this)">Missed Cutoff</button>
           </div>
           <span class="card-hint" id="atomic-card-hint">Sorted by predicted order volume this week</span>
@@ -1462,7 +1463,7 @@ function renderAtomicByAccount() {
   // blockCid: unique ID for this block (used by toggleCompany)
   // label: suffix shown after company name (e.g. "2 at-risk locations")
   const buildBlock = (company, blockSums, atype, blockCid, label) => {
-    const showExpandable = blockSums.length > 1 || (atype === 'needs-review' && company.locations.length > blockSums.length);
+    const showExpandable = blockSums.length > 1 || company.locations.length > blockSums.length;
     const bLastOrders = blockSums.map(s => s.lastOrder).filter(Boolean);
     const bLastOrder  = bLastOrders.length ? bLastOrders.reduce((a, b) => b > a ? b : a) : null;
     const bDaysSince  = bLastOrder ? Math.floor((TODAY - bLastOrder) / 86400000) : null;
@@ -1512,31 +1513,27 @@ function renderAtomicByAccount() {
   const buildRow = ({ company, summaries }) => {
     const isMulti  = company.locations.length > 1;
     const cid      = company.id;
-    const atRiskSums  = summaries.filter(s => s.daysSince !== null && s.daysSince >= 30);
-    const healthySums = summaries.filter(s => s.daysSince === null || s.daysSince < 30);
-    const isMixed  = atRiskSums.length > 0 && healthySums.length > 0;
+    // Tab membership comes from the 30d/90d order windows baked into data.json
+    // (loc.reviewStatus). No day-count thresholds here. Legacy data with no
+    // reviewStatus is treated as 'active'.
+    const activeSums = summaries.filter(s => (s.loc.reviewStatus || 'active') === 'active');
+    const reviewSums = summaries.filter(s => s.loc.reviewStatus === 'needs-review');
+    const newSums    = summaries.filter(s => s.loc.reviewStatus === 'new');
 
-    if (isMixed) {
-      // Healthy locations → Groups tab, at-risk locations → Needs Review tab
-      const nActive = healthySums.length;
-      const nRisk   = atRiskSums.length;
-      const healthyAtype = isMulti ? 'group' : 'independent';
-      const healthyLabel = `${nActive} active location${nActive !== 1 ? 's' : ''}`;
-      const riskLabel    = `${nRisk} at-risk location${nRisk !== 1 ? 's' : ''}`;
-      return buildBlock(company, healthySums, healthyAtype, `${cid}-active`, healthyLabel)
-           + buildBlock(company, atRiskSums,  'needs-review', `${cid}-risk`, riskLabel);
-    }
+    const groups = [
+      { sums: activeSums, atype: isMulti ? 'group' : 'independent', key: 'active', noun: 'active' },
+      { sums: reviewSums, atype: 'needs-review',                    key: 'review', noun: 'needs-review' },
+      { sums: newSums,    atype: 'new',                             key: 'new',    noun: 'new' },
+    ].filter(g => g.sums.length);
 
-    if (atRiskSums.length > 0) {
-      // All locations at risk
-      const label = isMulti ? `${atRiskSums.length} locations` : '';
-      return buildBlock(company, atRiskSums, 'needs-review', cid, label);
-    }
-
-    // All locations healthy
-    const atype = isMulti ? 'group' : 'independent';
-    const label = isMulti ? `${healthySums.length} locations` : '';
-    return buildBlock(company, healthySums, atype, cid, label);
+    const split = groups.length > 1;   // company spans more than one status
+    return groups.map(g => {
+      const blockCid = split ? `${cid}-${g.key}` : cid;
+      const n = g.sums.length;
+      const label = split ? `${n} ${g.noun} location${n !== 1 ? 's' : ''}`
+                          : (isMulti ? `${n} locations` : '');
+      return buildBlock(company, g.sums, g.atype, blockCid, label);
+    }).join('');
   };
 
   document.getElementById('atomic-tbody').innerHTML = rows.map(buildRow).join('');

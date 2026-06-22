@@ -2,17 +2,26 @@
 """
 PAR Ordering — Build data.json from MCP ShopifyQL output files.
 
-Usage (Claude Code runs the 10 queries via MCP, then calls this):
-  python3 scripts/refresh_from_mcp.py <60d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p>
+Account membership is driven by order-activity windows ("Company Orders" reports):
+  • Ordered in last 90 days  → included in the tool
+  • Ordered in last 30 days  → reviewStatus 'active'  (Independent / Groups tabs)
+  • In 90d but NOT in 30d     → reviewStatus 'needs-review'
+  • Not in 90d                → dropped entirely (never written)
+  • Created <90d ago, 0 orders→ reviewStatus 'new' (kept as a separate "New" group)
+There are no day-count thresholds in the front-end anymore; status is baked in here.
+
+Usage (Claude Code runs the queries via MCP, then calls this):
+  python3 scripts/refresh_from_mcp.py <90d> <30d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p> [companies] [lr_skus] [brew_tag_skus]
 
 Each file is the raw JSON saved by the run-analytics-query MCP tool:
   { "columns": [{"name": ...}], "rows": [[...], ...], "rowCount": N, ... }
 
-Queries (all: FROM sales SHOW quantity_ordered GROUP BY company_name, company_location_name, product_variant_sku, product_title WHERE company_name != '' ORDER BY quantity_ordered DESC LIMIT 5000):
-  60d    — SINCE -60d  UNTIL today
+Queries:
+  90d    — base/inclusion window. FROM sales SHOW quantity_ordered GROUP BY company_name, company_location_name, product_variant_sku, product_title WHERE company_name != '' ORDER BY quantity_ordered DESC LIMIT 5000 SINCE -90d UNTIL today
+  30d    — active membership. FROM sales SHOW orders GROUP BY company_name, company_location_name WHERE company_name != '' SINCE -30d UNTIL today
   w3l    — SINCE -21d  UNTIL today
   w3p    — SINCE -42d  UNTIL -21d
-  last   — FROM sales SHOW quantity_ordered, day GROUP BY ... SINCE -60d UNTIL today ORDER BY day DESC LIMIT 5000
+  last   — FROM sales SHOW quantity_ordered, day GROUP BY ..., day SINCE -90d UNTIL today ORDER BY day DESC LIMIT 5000
   ly_w3l — SINCE -386d UNTIL -365d  (LY 21-day window matching w3l)
   ly_w3p — SINCE -407d UNTIL -386d  (LY 21-day window matching w3p)
   w7l    — SINCE -49d  UNTIL today
@@ -29,7 +38,8 @@ from pathlib import Path
 
 # ── CONSTANTS (mirrors agg.py) ────────────────────────────────────────────────
 TODAY       = datetime.now(timezone.utc)
-WINDOW_DAYS = 60
+WINDOW_DAYS = 90   # base/inclusion window. NOTE: the JSON key 'qty60' below holds
+                   # this window's qty (kept named qty60 for front-end compatibility).
 
 INTERNAL_NAMES = {'Atomic Coffee Roasters (Internal)'}
 
@@ -178,6 +188,29 @@ def load_mcp_file(path):
     data = json.loads(Path(path).read_text())
     cols = [c['name'] for c in data['columns']]
     return [dict(zip(cols, row)) for row in data['rows']]
+
+
+def load_membership(path):
+    """Parse the 30-day membership query (SHOW orders GROUP BY company, location).
+    Returns set of (company_name, location_name) with at least one order in the window.
+    These locations are 'active'; included-but-absent locations are 'needs-review'.
+    """
+    data = json.loads(Path(path).read_text())
+    cols = [c['name'] for c in data['columns']]
+    active = set()
+    for row in data['rows']:
+        r = dict(zip(cols, row))
+        cname = (r.get('company_name') or '').strip()
+        lname = (r.get('company_location_name') or '').strip()
+        if not cname or cname in INTERNAL_NAMES:
+            continue
+        try:
+            orders = float(r.get('orders') or 0)
+        except (ValueError, TypeError):
+            orders = 0
+        if orders > 0:
+            active.add((cname, lname))
+    return active
 
 
 def build_last_lookup(rows, lr_skus=None, brew_tag_skus=None):
@@ -374,7 +407,7 @@ def compute_benchmarks(locs):
     return {sku: round(sum(rates) / len(rates), 3) for sku, rates in sku_rates.items()}
 
 
-def build_json(locs, last_lookup, benchmarks, new_companies=None, sku_names=None):
+def build_json(locs, last_lookup, benchmarks, active_set, new_companies=None, sku_names=None):
     by_company = defaultdict(lambda: {'name': None, 'locations': []})
 
     for (cname, lname), loc in locs.items():
@@ -423,11 +456,15 @@ def build_json(locs, last_lookup, benchmarks, new_companies=None, sku_names=None
         items.sort(key=lambda i: (ITEM_ORDER.get(i['usageUnit'], 9), i['name']))
         c = by_company[cname]
         c['name'] = cname
+        # Active if it ordered in the last 30 days; otherwise it's in the 90d
+        # window but not the 30d window → needs review.
+        review_status = 'active' if (cname, lname) in active_set else 'needs-review'
         c['locations'].append({
             'id': len(c['locations']),
             'name': lname,
             'deliveryDay': loc['delivery_day'] or 'wednesday',
             'daysOpen': 7, 'safetyDays': 3,
+            'reviewStatus': review_status,
             'items': items,
         })
 
@@ -466,6 +503,7 @@ def build_json(locs, last_lookup, benchmarks, new_companies=None, sku_names=None
                     'name': loc_name,
                     'deliveryDay': co.get('deliveryDay', 'wednesday'),
                     'daysOpen': 7, 'safetyDays': 5,
+                    'reviewStatus': 'new',
                     'items': items,
                 })
 
@@ -483,17 +521,17 @@ def build_json(locs, last_lookup, benchmarks, new_companies=None, sku_names=None
 
 
 def main():
-    if len(sys.argv) not in (11, 12, 13, 14):
-        sys.exit("Usage: refresh_from_mcp.py <60d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p> [companies] [lr_skus] [brew_tag_skus]")
+    if len(sys.argv) not in (12, 13, 14, 15):
+        sys.exit("Usage: refresh_from_mcp.py <90d> <30d> <w3l> <w3p> <last> <ly_w3l> <ly_w3p> <w7l> <w7p> <ly_w7l> <ly_w7p> [companies] [lr_skus] [brew_tag_skus]")
 
     args = sys.argv[1:]
-    f60, fw3l, fw3p, flast, fly_w3l, fly_w3p, fw7l, fw7p, fly_w7l, fly_w7p = args[:10]
-    fcompanies    = args[10] if len(args) >= 11 else None
-    flr_skus      = args[11] if len(args) >= 12 else None
-    fbrew_tag     = args[12] if len(args) >= 13 else None
+    f90, f30, fw3l, fw3p, flast, fly_w3l, fly_w3p, fw7l, fw7p, fly_w7l, fly_w7p = args[:11]
+    fcompanies    = args[11] if len(args) >= 12 else None
+    flr_skus      = args[12] if len(args) >= 13 else None
+    fbrew_tag     = args[13] if len(args) >= 14 else None
 
     print("Loading MCP result files...")
-    rows_60d    = load_mcp_file(f60)
+    rows_60d    = load_mcp_file(f90)   # base/inclusion window (90d) → fills qty60 field
     rows_w3l    = load_mcp_file(fw3l)
     rows_w3p    = load_mcp_file(fw3p)
     rows_last   = load_mcp_file(flast)
@@ -511,6 +549,9 @@ def main():
     lr_skus       = load_lr_skus(flr_skus)
     brew_tag_skus = load_brew_tag_skus(fbrew_tag)
 
+    active_set = load_membership(f30)
+    print(f"  Active membership (ordered in last 30d): {len(active_set)} locations")
+
     delivery_days = load_delivery_days()
     print(f"  Delivery day lookup: {len(delivery_days)} locations")
 
@@ -527,7 +568,7 @@ def main():
     if fcompanies:
         new_companies = parse_companies_file(fcompanies)
         print(f"  New accounts (< 60 days, 0 orders): {len(new_companies)}")
-    companies = build_json(locs, last_lookup, benchmarks, new_companies, sku_names)
+    companies = build_json(locs, last_lookup, benchmarks, active_set, new_companies, sku_names)
 
     out = Path(__file__).parent.parent / 'data.json'
     payload = {
@@ -538,7 +579,15 @@ def main():
     out.write_text(json.dumps(payload, indent=2, default=str))
 
     active = len([c for c in companies if not c.get('isInternal')])
-    print(f"\ndata.json written — {active} companies, {sum(len(c['locations']) for c in companies if not c.get('isInternal'))} locations")
+    status_counts = Counter(
+        loc.get('reviewStatus', 'active')
+        for c in companies if not c.get('isInternal')
+        for loc in c['locations']
+    )
+    n_locs = sum(len(c['locations']) for c in companies if not c.get('isInternal'))
+    print(f"\ndata.json written — {active} companies, {n_locs} locations")
+    print(f"  by status: active={status_counts.get('active', 0)} "
+          f"needs-review={status_counts.get('needs-review', 0)} new={status_counts.get('new', 0)}")
 
 
 if __name__ == '__main__':

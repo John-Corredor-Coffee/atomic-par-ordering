@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "par-ordering",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": ["-c", "python3 -m http.server \"${PORT:-3456}\" --bind 127.0.0.1 --directory /Users/johncorredor/Desktop/Vault/par-ordering"],
+      "port": 3456
+    }
+  ]
+}

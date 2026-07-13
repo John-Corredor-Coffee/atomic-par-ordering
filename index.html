@@ -262,6 +262,7 @@
     .tag-predicted { background: #e8f4ff; color: #1a6b9a; }
     .tag-corrected { background: #dcfce7; color: #166534; }
     .tag-stale     { background: #fef3c7; color: #92400e; }
+    .new-pred { border-bottom: 1px dotted rgba(0,0,0,0.4); cursor: help; }
 
     .stale-banner {
       background: #fffbef;
@@ -921,6 +922,27 @@ function trendClass(pct) { return pct > 0.02 ? 'up' : pct < -0.02 ? 'down' : 'fl
 function trendArrow(pct) { return pct > 0.02 ? '▲' : pct < -0.02 ? '▼' : '—'; }
 function fmtLbs(lbs) { return lbs === 0 ? '<span style="color:rgba(0,0,0,0.3)">—</span>' : lbs.toFixed(0) + ' lbs'; }
 
+// Predicted volume in lbs, with the equivalent count of 5lb bags in parentheses.
+function fmtLbsBags(lbs) {
+  if (lbs === 0) return '<span style="color:rgba(0,0,0,0.3)">—</span>';
+  const bags = Math.round(lbs / 5);
+  return `${lbs.toFixed(0)} lbs <span style="color:rgba(0,0,0,0.4);font-size:12px">(${bags} × 5lb)</span>`;
+}
+
+// Tooltip explaining where a brand-new account's predicted volume comes from
+// (no order history — seeded from a portfolio benchmark).
+const NEW_PRED_TIP = "No order history yet. This is a starting estimate — the average usage per product across Atomic's established independent wholesale accounts, matched to this account's catalog tier. It updates automatically once real orders come in.";
+
+// Render a Predicted Vol. cell. For 'new' accounts, wrap the value in a
+// hoverable span carrying NEW_PRED_TIP.
+function predVolCell(lbs, isNew) {
+  const inner = fmtLbsBags(lbs);
+  if (isNew && lbs > 0) {
+    return `<td><strong><span class="new-pred" title="${NEW_PRED_TIP}">${inner}</span></strong></td>`;
+  }
+  return `<td><strong>${inner}</strong></td>`;
+}
+
 // ------------------------------------------------------------------
 // RENDER: CLIENT VIEW
 // ------------------------------------------------------------------
@@ -1345,7 +1367,7 @@ function renderAdmin(companyId) {
       <td>${fmtLastOrder(lastOrder, daysSince)}</td>
       <td>${fmt(cutoff)}, 11:59 PM</td>
       <td>${fmtLbs(weeklyLbs)}</td>
-      <td><strong>${fmtLbs(totalLbs)}</strong></td>
+      ${predVolCell(totalLbs, loc.reviewStatus === 'new')}
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy * 100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3 * 100).toFixed(1)}%</span></td>
       <td><span class="status-dot ${dotClass}"></span>${status}</td>
@@ -1435,7 +1457,7 @@ function renderAtomicByLocation() {
       <td style="text-transform:capitalize">${loc.deliveryDay}</td>
       <td>${fmtLastOrder(lastOrder, daysSince)}</td>
       <td>${fmtLbs(weeklyLbs)}</td>
-      <td><strong>${fmtLbs(totalLbs)}</strong></td>
+      ${predVolCell(totalLbs, loc.reviewStatus === 'new')}
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
       <td><span class="status-dot ${atRisk ? 'dot-red' : dotClass}"></span>${atRisk ? 'At Risk' : status}</td>
@@ -1500,7 +1522,7 @@ function renderAtomicByAccount() {
       <td>${delivDays}</td>
       <td>${fmtLastOrder(bLastOrder, bDaysSince)}</td>
       <td>${fmtLbs(bWeeklyLbs)}</td>
-      <td><strong>${fmtLbs(bTotalLbs)}</strong></td>
+      ${predVolCell(bTotalLbs, atype === 'new')}
       <td><span class="trend-pill ${trendClass(bAvgYoy)}">${trendArrow(bAvgYoy)} ${(bAvgYoy*100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(bAvgW3)}">${trendArrow(bAvgW3)} ${(bAvgW3*100).toFixed(1)}%</span></td>
       <td><span class="status-dot ${bDot}"></span>${statusText}</td>
@@ -1514,7 +1536,7 @@ function renderAtomicByAccount() {
           <td style="text-transform:capitalize">${loc.deliveryDay}</td>
           <td>${fmtLastOrder(lLast, lDays)}</td>
           <td>${fmtLbs(lWeekly)}</td>
-          <td>${fmtLbs(lLbs)}</td>
+          ${predVolCell(lLbs, atype === 'new')}
           <td><span class="trend-pill ${trendClass(lYoy)}">${trendArrow(lYoy)} ${(lYoy*100).toFixed(1)}%</span></td>
           <td><span class="trend-pill ${trendClass(lW3)}">${trendArrow(lW3)} ${(lW3*100).toFixed(1)}%</span></td>
           <td><span class="status-dot ${lDot}"></span>${status}</td>
@@ -1562,7 +1584,7 @@ function renderAtomicByAccount() {
       <td>${dd}</td>
       <td>${fmtLastOrder(lastOrder, daysSince)}</td>
       <td>${fmtLbs(weeklyLbs)}</td>
-      <td><strong>${fmtLbs(totalLbs)}</strong></td>
+      ${predVolCell(totalLbs, false)}
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
       <td><span class="status-dot ${dotClass}"></span>${status}</td>

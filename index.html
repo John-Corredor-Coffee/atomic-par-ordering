@@ -199,16 +199,14 @@
 
     /* ── TABLE ── */
     table { width: 100%; border-collapse: collapse; }
-    /* Hide Est Weekly Use (col 4) + Predicted Vol. (col 5) on the Needs Review tab.
-       Only ever set in the By Account view, where those are columns 4 & 5. */
+    /* Hide Est Weekly Use (col 4) on the Needs Review tab. Only ever set in the
+       By Account view, where that's column 4. Predicted Vol. is hidden globally
+       below via .col-pred, so it no longer needs a rule here too. */
     #atomic-thead.hide-usage th:nth-child(4),
-    #atomic-thead.hide-usage th:nth-child(5),
-    #atomic-tbody.hide-usage td:nth-child(4),
-    #atomic-tbody.hide-usage td:nth-child(5) { display: none; }
-    /* Hide only Predicted Vol. (col 5) on the New tab — it's a benchmark-seeded
-       estimate for accounts with no order history, not a real prediction to show. */
-    #atomic-thead.hide-pred th:nth-child(5),
-    #atomic-tbody.hide-pred td:nth-child(5) { display: none; }
+    #atomic-tbody.hide-usage td:nth-child(4) { display: none; }
+    /* Predicted Vol. is hidden everywhere for now — internal dashboard + the
+       customer-facing admin view. Remove this rule to bring it back. */
+    .col-pred { display: none; }
     th {
       padding: 12px 24px;
       text-align: left;
@@ -578,7 +576,7 @@
             <button class="account-tab" data-filter="new" onclick="filterAccountType('new', this)">New</button>
             <button class="account-tab" data-filter="missed-cutoff" onclick="filterAccountType('missed-cutoff', this)">Missed Cutoff</button>
           </div>
-          <span class="card-hint" id="atomic-card-hint">Sorted by predicted order volume this week</span>
+          <span class="card-hint" id="atomic-card-hint">Sorted by est. weekly usage</span>
         </div>
       </div>
       <table>
@@ -596,7 +594,7 @@
         <span class="card-title">All Wholesale Accounts</span>
         <div style="display:flex;align-items:center;gap:16px">
           <input class="admin-search" id="admin-search" type="text" placeholder="Search account…" oninput="filterAdminRows(this.value)">
-          <span class="card-hint">Sorted by predicted order volume this week</span>
+          <span class="card-hint">Sorted by est. weekly usage</span>
         </div>
       </div>
       <table>
@@ -692,7 +690,7 @@ let usageSummaryLoading = false;
 // Keyed by "companyId-locationId-itemIdx"
 const edited = {};
 
-const sortState    = { col: 'totalLbs', dir: -1 };
+const sortState    = { col: 'weeklyLbs', dir: -1 };
 const parSortState = { col: null, dir: -1 };
 let parRowOrder    = [];   // locked row order while editing on-hand
 let isEditingOnHand = false;
@@ -702,10 +700,10 @@ let needsReviewFlat = false;
 // Missed Cutoff tab: same de-nesting behavior, scoped to missed-cutoff locations.
 let missedCutoffFlat = false;
 
-function thSort(label, col) {
+function thSort(label, col, extraClass = '') {
   const active = sortState.col === col;
   const ind = active ? (sortState.dir === 1 ? '↑' : '↓') : '↕';
-  return `<th class="sortable${active ? ' sort-active' : ''}" onclick="sortTable('${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
+  return `<th class="sortable${active ? ' sort-active' : ''}${extraClass ? ' ' + extraClass : ''}" onclick="sortTable('${col}')">${label}<span class="sort-ind">${ind}</span></th>`;
 }
 
 function colVal(row, col) {
@@ -947,9 +945,9 @@ const NEW_PRED_TIP = "No order history yet. This is a starting estimate — the 
 function predVolCell(lbs, isNew) {
   const inner = fmtLbsBags(lbs);
   if (isNew && lbs > 0) {
-    return `<td><strong><span class="new-pred" title="${NEW_PRED_TIP}">${inner}</span></strong></td>`;
+    return `<td class="col-pred"><strong><span class="new-pred" title="${NEW_PRED_TIP}">${inner}</span></strong></td>`;
   }
-  return `<td><strong>${inner}</strong></td>`;
+  return `<td class="col-pred"><strong>${inner}</strong></td>`;
 }
 
 // ------------------------------------------------------------------
@@ -1333,7 +1331,7 @@ function renderAdmin(companyId) {
     thSort('Last Order', 'lastOrder') +
     thSort('Cutoff', 'cutoff') +
     thSort('Est Weekly Use (lbs)', 'weeklyLbs') +
-    thSort('Predicted Vol. (lbs)', 'totalLbs') +
+    thSort('Predicted Vol. (lbs)', 'totalLbs', 'col-pred') +
     thSort('YoY Trend', 'yoy') +
     thSort('3-Wk Trend', 'w3') +
     thSort('Status', 'status');
@@ -1454,7 +1452,7 @@ function renderAtomicByLocation() {
     thSort('Delivery Day', 'deliveryDay') +
     thSort('Last Order', 'lastOrder') +
     thSort('Est Weekly Use (lbs)', 'weeklyLbs') +
-    thSort('Predicted Vol. (lbs)', 'totalLbs') +
+    thSort('Predicted Vol. (lbs)', 'totalLbs', 'col-pred') +
     thSort('YoY Trend', 'yoy') +
     thSort('3-Wk Trend', 'w3') +
     thSort('Status', 'status');
@@ -1487,7 +1485,7 @@ function renderAtomicByAccount() {
     thSort('Delivery Day', 'deliveryDay') +
     thSort('Last Order', 'lastOrder') +
     thSort('Est Weekly Use (lbs)', 'weeklyLbs') +
-    thSort('Predicted Vol. (lbs)', 'totalLbs') +
+    thSort('Predicted Vol. (lbs)', 'totalLbs', 'col-pred') +
     thSort('YoY Trend', 'yoy') +
     thSort('3-Wk Trend', 'w3') +
     thSort('Status', 'status');
@@ -1658,14 +1656,11 @@ function filterAccountType(type, btn) {
 
 // Apply the current tab's visibility + column rules (no re-render). Called by render.
 function applyAccountFilter(type) {
-  // Needs Review tab hides the Est Weekly Use + Predicted Vol. columns.
+  // Needs Review tab additionally hides the Est Weekly Use column
+  // (Predicted Vol. is hidden globally via .col-pred, no tab-specific rule needed).
   const hideUsage = type === 'needs-review';
-  // New tab hides only Predicted Vol. — it's a benchmark-seeded estimate, not real data.
-  const hidePred = type === 'new';
   document.getElementById('atomic-thead').classList.toggle('hide-usage', hideUsage);
   document.getElementById('atomic-tbody').classList.toggle('hide-usage', hideUsage);
-  document.getElementById('atomic-thead').classList.toggle('hide-pred', hidePred);
-  document.getElementById('atomic-tbody').classList.toggle('hide-pred', hidePred);
   document.querySelectorAll('#atomic-tbody tr').forEach(row => {
     const matches = row.dataset.atype === type;
     if (matches) {

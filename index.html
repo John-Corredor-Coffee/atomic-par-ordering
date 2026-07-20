@@ -205,6 +205,10 @@
     #atomic-thead.hide-usage th:nth-child(5),
     #atomic-tbody.hide-usage td:nth-child(4),
     #atomic-tbody.hide-usage td:nth-child(5) { display: none; }
+    /* Hide only Predicted Vol. (col 5) on the New tab — it's a benchmark-seeded
+       estimate for accounts with no order history, not a real prediction to show. */
+    #atomic-thead.hide-pred th:nth-child(5),
+    #atomic-tbody.hide-pred td:nth-child(5) { display: none; }
     th {
       padding: 12px 24px;
       text-align: left;
@@ -630,6 +634,8 @@ let currentLocationId = 0;
 
 // Phase 2 — Apps Script endpoint for persisting on-hand data
 const PHASE2_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyUhpWNe0dj8f8qOYn26W2NKVVoO9Tl2Wi1JkJSWrP26cNKTTzjKdIcrhqLoBCf7jXiQA/exec';
+// Must match SHARED_SECRET in scripts/phase2/Code.gs — rotate both together.
+const PHASE2_SECRET = '8e9deda99d6e5cdaf70adee3310d4b62f804bf3c6788bcc0';
 
 // ── Item category grouping (mirrors COGS tool taxonomy) ──────────────────────
 const CATEGORY_ORDER = [
@@ -693,6 +699,8 @@ let isEditingOnHand = false;
 // Needs Review tab: grouped by company by default; once the user sorts a column
 // it de-nests into a flat, sorted list of the individual needs-review locations.
 let needsReviewFlat = false;
+// Missed Cutoff tab: same de-nesting behavior, scoped to missed-cutoff locations.
+let missedCutoffFlat = false;
 
 function thSort(label, col) {
   const active = sortState.col === col;
@@ -737,9 +745,10 @@ function applySortRows(rows) {
 function sortTable(col) {
   sortState.dir = sortState.col === col ? -sortState.dir : (col === 'deliveryDay' ? 1 : -1);
   sortState.col = col;
-  // Sorting while on the Needs Review tab de-nests it into a flat location list.
+  // Sorting while on the Needs Review / Missed Cutoff tab de-nests it into a flat location list.
   const activeTab = document.querySelector('.account-tab.active');
   if (activeTab && activeTab.dataset.filter === 'needs-review') needsReviewFlat = true;
+  if (activeTab && activeTab.dataset.filter === 'missed-cutoff') missedCutoffFlat = true;
   document.getElementById('atomic-card-hint').textContent = '';
   if (!document.getElementById('atomic-view').classList.contains('hidden')) {
     if (document.getElementById('btn-by-account').classList.contains('active')) renderAtomicByAccount();
@@ -869,7 +878,7 @@ async function loadUsageSummary(companyIdx, locationIdx) {
 
   usageSummaryLoading = true;
   try {
-    const url = `${PHASE2_ENDPOINT}?company_id=${encodeURIComponent(cid)}&location_id=${encodeURIComponent(lid)}`;
+    const url = `${PHASE2_ENDPOINT}?company_id=${encodeURIComponent(cid)}&location_id=${encodeURIComponent(lid)}&secret=${encodeURIComponent(PHASE2_SECRET)}`;
     const res  = await fetch(url);
     const data = await res.json();
     if (data.ok && data.items && data.items.length > 0) {
@@ -1247,6 +1256,7 @@ async function saveOnHandToSheet(key, companyIdx, locationIdx, sku, btn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action:        'writeOnHand',
+        secret:        PHASE2_SECRET,
         company_id:    company.id   || String(companyIdx),
         company_name:  company.name,
         location_id:   loc.id       || String(locationIdx),
@@ -1348,7 +1358,9 @@ function renderAdmin(companyId) {
     const avgYoy = activeItems.length ? activeItems.reduce((s, i) => s + i.yoy, 0) / activeItems.length : 0;
     const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
     const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
-    const lastOrder = validOrders.length ? validOrders.reduce((a, b) => b > a ? b : a) : null;
+    // Fall back to units/merch items when there's no coffee item to source a date from.
+    const orderDates = validOrders.length ? validOrders : loc.items.map(i => i.lastOrder).filter(Boolean);
+    const lastOrder = orderDates.length ? orderDates.reduce((a, b) => b > a ? b : a) : null;
     const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : null;
     return { loc, cutoff, hours, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince };
   }));
@@ -1419,7 +1431,10 @@ function locationSummary(loc) {
   const avgYoy = activeItems.length ? activeItems.reduce((s, i) => s + i.yoy, 0) / activeItems.length : 0;
   const avgW3  = activeItems.length ? activeItems.reduce((s, i) => s + i.w3,  0) / activeItems.length : 0;
   const validOrders = activeItems.map(i => i.lastOrder).filter(Boolean);
-  const lastOrder = validOrders.length ? validOrders.reduce((a, b) => b > a ? b : a) : null;
+  // If this account has no coffee (lbs) item to source a date from, fall back to all
+  // items — including units/merch — so accounts that only ordered equipment still show one.
+  const orderDates = validOrders.length ? validOrders : loc.items.map(i => i.lastOrder).filter(Boolean);
+  const lastOrder = orderDates.length ? orderDates.reduce((a, b) => b > a ? b : a) : null;
   const daysSince = lastOrder ? Math.floor((TODAY - lastOrder) / 86400000) : null;
   let status, dotClass;
   if (lastOrder && daysSince > 21)   { status = 'Overdue';     dotClass = 'dot-red'; }
@@ -1516,8 +1531,7 @@ function renderAtomicByAccount() {
     const delivDays  = [...new Set(blockSums.map(s => s.loc.deliveryDay))]
       .map(d => d[0].toUpperCase() + d.slice(1, 3)).join(', ');
 
-    const blockMissed = blockSums.some(s => hasMissedCutoff(s.loc));
-    const parentRow = `<tr class="row-parent${showExpandable ? ' collapsible collapsed' : ''}${atRiskCls}" data-cid="${blockCid}" data-atype="${atype}" data-missed="${blockMissed}" data-company="${company.name.toLowerCase()}" ${showExpandable ? `onclick="toggleCompany(this)"` : ''}>
+    const parentRow = `<tr class="row-parent${showExpandable ? ' collapsible collapsed' : ''}${atRiskCls}" data-cid="${blockCid}" data-atype="${atype}" data-company="${company.name.toLowerCase()}" ${showExpandable ? `onclick="toggleCompany(this)"` : ''}>
       <td>${chevron}${company.name}${label ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${label}</span>` : ''}</td>
       <td>${delivDays}</td>
       <td>${fmtLastOrder(bLastOrder, bDaysSince)}</td>
@@ -1530,8 +1544,7 @@ function renderAtomicByAccount() {
 
     const childRows = showExpandable ? [...blockSums].sort((a, b) => b.totalLbs - a.totalLbs)
       .map(({ loc, weeklyLbs: lWeekly, totalLbs: lLbs, avgYoy: lYoy, avgW3: lW3, lastOrder: lLast, daysSince: lDays, status, dotClass: lDot }) => {
-        const childMissed = hasMissedCutoff(loc);
-        return `<tr class="row-child" data-parent-cid="${blockCid}" data-atype="${atype}" data-missed="${childMissed}" data-company="${company.name.toLowerCase()}" style="display:none">
+        return `<tr class="row-child" data-parent-cid="${blockCid}" data-atype="${atype}" data-company="${company.name.toLowerCase()}" style="display:none">
           <td>${loc.name}</td>
           <td style="text-transform:capitalize">${loc.deliveryDay}</td>
           <td>${fmtLastOrder(lLast, lDays)}</td>
@@ -1555,13 +1568,18 @@ function renderAtomicByAccount() {
     const activeSums = summaries.filter(s => (s.loc.reviewStatus || 'active') === 'active');
     const reviewSums = summaries.filter(s => s.loc.reviewStatus === 'needs-review');
     const newSums    = summaries.filter(s => s.loc.reviewStatus === 'new');
+    // Missed-cutoff is orthogonal to reviewStatus (any status can miss cutoff), so this
+    // location also still appears in its normal status block above — just not aggregated
+    // together with it on the Missed Cutoff tab, where only this block is shown.
+    const missedSums = summaries.filter(s => hasMissedCutoff(s.loc));
 
     const groups = [
-      { sums: activeSums, atype: isMulti ? 'group' : 'independent', key: 'active', noun: 'active' },
-      { sums: reviewSums, atype: 'needs-review',                    key: 'review', noun: 'needs-review' },
-      { sums: newSums,    atype: 'new',                             key: 'new',    noun: 'new' },
-      // When flattening, the needs-review block is rendered separately (de-nested).
-    ].filter(g => g.sums.length && !(needsReviewFlat && g.key === 'review'));
+      { sums: activeSums, atype: isMulti ? 'group' : 'independent', key: 'active',  noun: 'active' },
+      { sums: reviewSums, atype: 'needs-review',                    key: 'review',  noun: 'needs-review' },
+      { sums: newSums,    atype: 'new',                             key: 'new',     noun: 'new' },
+      { sums: missedSums, atype: 'missed-cutoff',                   key: 'missed',  noun: 'missed-cutoff' },
+      // When flattening, the needs-review / missed-cutoff blocks are rendered separately (de-nested).
+    ].filter(g => g.sums.length && !(needsReviewFlat && g.key === 'review') && !(missedCutoffFlat && g.key === 'missed'));
 
     const split = groups.length > 1;   // company spans more than one status
     return groups.map(g => {
@@ -1575,16 +1593,32 @@ function renderAtomicByAccount() {
 
   // De-nested Needs Review row: one flat, top-level row per needs-review location.
   const buildFlatNeedsReviewRow = ({ company, loc, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => {
-    const missed   = hasMissedCutoff(loc);
     const locLabel = loc.name && loc.name !== company.name
       ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${loc.name}</span>` : '';
     const dd = loc.deliveryDay ? loc.deliveryDay[0].toUpperCase() + loc.deliveryDay.slice(1, 3) : '';
-    return `<tr class="row-parent" data-atype="needs-review" data-missed="${missed}" data-company="${company.name.toLowerCase()}">
+    return `<tr class="row-parent" data-atype="needs-review" data-company="${company.name.toLowerCase()}">
       <td>${company.name}${locLabel}</td>
       <td>${dd}</td>
       <td>${fmtLastOrder(lastOrder, daysSince)}</td>
       <td>${fmtLbs(weeklyLbs)}</td>
       ${predVolCell(totalLbs, false)}
+      <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
+      <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
+      <td><span class="status-dot ${dotClass}"></span>${status}</td>
+    </tr>`;
+  };
+
+  // De-nested Missed Cutoff row: one flat, top-level row per missed-cutoff location.
+  const buildFlatMissedCutoffRow = ({ company, loc, totalLbs, weeklyLbs, avgYoy, avgW3, lastOrder, daysSince, status, dotClass }) => {
+    const locLabel = loc.name && loc.name !== company.name
+      ? ` <span style="font-size:11px;font-weight:400;color:rgba(0,0,0,0.4);margin-left:6px">${loc.name}</span>` : '';
+    const dd = loc.deliveryDay ? loc.deliveryDay[0].toUpperCase() + loc.deliveryDay.slice(1, 3) : '';
+    return `<tr class="row-parent" data-atype="missed-cutoff" data-company="${company.name.toLowerCase()}">
+      <td>${company.name}${locLabel}</td>
+      <td>${dd}</td>
+      <td>${fmtLastOrder(lastOrder, daysSince)}</td>
+      <td>${fmtLbs(weeklyLbs)}</td>
+      ${predVolCell(totalLbs, loc.reviewStatus === 'new')}
       <td><span class="trend-pill ${trendClass(avgYoy)}">${trendArrow(avgYoy)} ${(avgYoy*100).toFixed(1)}%</span></td>
       <td><span class="trend-pill ${trendClass(avgW3)}">${trendArrow(avgW3)} ${(avgW3*100).toFixed(1)}%</span></td>
       <td><span class="status-dot ${dotClass}"></span>${status}</td>
@@ -1599,6 +1633,13 @@ function renderAtomicByAccount() {
     }));
     html += applySortRows(nrLocs).map(buildFlatNeedsReviewRow).join('');
   }
+  if (missedCutoffFlat) {
+    const mcLocs = [];
+    companies.forEach(c => c.locations.forEach(loc => {
+      if (hasMissedCutoff(loc)) mcLocs.push({ company: c, loc, ...locationSummary(loc) });
+    }));
+    html += applySortRows(mcLocs).map(buildFlatMissedCutoffRow).join('');
+  }
 
   document.getElementById('atomic-tbody').innerHTML = html;
   document.getElementById('account-type-tabs').style.display = '';
@@ -1611,6 +1652,7 @@ function filterAccountType(type, btn) {
   document.querySelectorAll('.account-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   needsReviewFlat = false;
+  missedCutoffFlat = false;
   renderAtomicByAccount();
 }
 
@@ -1618,11 +1660,14 @@ function filterAccountType(type, btn) {
 function applyAccountFilter(type) {
   // Needs Review tab hides the Est Weekly Use + Predicted Vol. columns.
   const hideUsage = type === 'needs-review';
+  // New tab hides only Predicted Vol. — it's a benchmark-seeded estimate, not real data.
+  const hidePred = type === 'new';
   document.getElementById('atomic-thead').classList.toggle('hide-usage', hideUsage);
   document.getElementById('atomic-tbody').classList.toggle('hide-usage', hideUsage);
+  document.getElementById('atomic-thead').classList.toggle('hide-pred', hidePred);
+  document.getElementById('atomic-tbody').classList.toggle('hide-pred', hidePred);
   document.querySelectorAll('#atomic-tbody tr').forEach(row => {
-    const isMissedTab = type === 'missed-cutoff';
-    const matches = isMissedTab ? row.dataset.missed === 'true' : row.dataset.atype === type;
+    const matches = row.dataset.atype === type;
     if (matches) {
       if (row.classList.contains('row-child')) {
         const parent = document.querySelector(`tr.row-parent[data-cid="${row.dataset.parentCid}"]`);
@@ -1645,7 +1690,9 @@ function toggleCompany(parentTr) {
 }
 
 function renderAtomicSummary() {
-  const locs = allLocations();
+  // New accounts' usage is a benchmark-seeded estimate, not real order history —
+  // exclude them so the headline total only reflects established accounts.
+  const locs = allLocations().filter(({ loc }) => loc.reviewStatus !== 'new');
   const beanItems = locs.flatMap(({ loc }) => loc.items.filter(i => i.usageUnit === 'lbs'));
   const totalLbs  = beanItems.reduce((s, i) => s + i.avgDaily * 7, 0);
   const totalW3l   = beanItems.reduce((s, i) => s + (i.qw3l   || 0), 0);
@@ -1676,7 +1723,8 @@ function setAtomicView(view, btn) {
   btn.classList.add('active');
   const s = document.getElementById('atomic-search');
   if (s) s.value = '';
-  needsReviewFlat = false;   // switching views returns Needs Review to grouped default
+  needsReviewFlat = false;   // switching views returns Needs Review / Missed Cutoff to grouped default
+  missedCutoffFlat = false;
   renderAtomicSummary();
   if (view === 'account') renderAtomicByAccount();
   else renderAtomicByLocation();
@@ -1850,7 +1898,7 @@ function normalizeCompanies(raw) {
 
 async function loadData() {
   try {
-    const resp = await fetch('data.json');
+    const resp = await fetch('/api/data.json');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
     COMPANIES = normalizeCompanies(json.companies || []);
@@ -1945,7 +1993,10 @@ function renderSummaryStrip() {
   if (!strip) return;
 
   const locs = allLocations();
-  const totalLbs = locs.flatMap(({ loc }) => loc.items.filter(i => i.usageUnit === 'lbs'))
+  // New accounts' usage is a benchmark-seeded estimate, not real order history —
+  // exclude them so the headline total only reflects established accounts.
+  const totalLbs = locs.filter(({ loc }) => loc.reviewStatus !== 'new')
+    .flatMap(({ loc }) => loc.items.filter(i => i.usageUnit === 'lbs'))
     .reduce((s, i) => s + i.avgDaily * 7, 0);
 
   const overdueCount = locs.filter(({ loc }) => {

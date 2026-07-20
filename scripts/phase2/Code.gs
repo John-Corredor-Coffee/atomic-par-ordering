@@ -1,10 +1,17 @@
 // PAR Tool — Phase 2 On-Hand Write Endpoint
 // Deploy as: Google Apps Script Web App (Execute as: Me, Access: Anyone)
+// "Anyone" is required so the static PAR tool can call this without a Google login —
+// SHARED_SECRET below is the real authorization boundary, not the Access setting.
 // Sheet ID: 11iLeJILCJ_ZZE7d96omWV6Awki7xJGAuUpHy_EjpxeI
 
 const SHEET_ID = '11iLeJILCJ_ZZE7d96omWV6Awki7xJGAuUpHy_EjpxeI';
 const STALE_WEEKS  = 2;   // flag as stale after this many weeks
 const EXPIRE_WEEKS = 4;   // drop from active use after this many weeks
+const EWMA_HALF_LIFE_WEEKS = 3; // recent weeks weighted higher than avg4/avg12; tune here
+
+// Must match PHASE2_SECRET in par-ordering/index.html. Rotate by changing both,
+// then Deploy → Manage deployments → New version (see DEPLOY.md).
+const SHARED_SECRET = '8e9deda99d6e5cdaf70adee3310d4b62f804bf3c6788bcc0';
 
 // ── Fiscal week helper ─────────────────────────────────────────────────────
 function getFiscalWeek(date) {
@@ -18,21 +25,17 @@ function getFiscalWeek(date) {
   return Math.max(1, Math.min(52, week));
 }
 
-// ── CORS headers ───────────────────────────────────────────────────────────
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
-  };
-}
-
 // ── Main POST handler ──────────────────────────────────────────────────────
 function doPost(e) {
+  let payload;
   try {
-    const payload = JSON.parse(e.postData.contents);
-    const action  = payload.action;
+    payload = JSON.parse(e.postData.contents);
+    const action = payload.action;
+
+    if (payload.secret !== SHARED_SECRET) {
+      logError('doPost:auth', 'Invalid or missing secret', payload);
+      return respond(401, { error: 'Unauthorized' });
+    }
 
     if (action === 'writeOnHand') {
       return writeOnHand(payload);
@@ -42,6 +45,7 @@ function doPost(e) {
       return respond(400, { error: 'Unknown action: ' + action });
     }
   } catch (err) {
+    logError('doPost', err.message, payload);
     return respond(500, { error: err.message });
   }
 }
@@ -49,6 +53,10 @@ function doPost(e) {
 function doGet(e) {
   // Allow GET for usage summary lookups
   try {
+    if (e.parameter.secret !== SHARED_SECRET) {
+      logError('doGet:auth', 'Invalid or missing secret', e.parameter);
+      return respond(401, { error: 'Unauthorized' });
+    }
     const company_id  = e.parameter.company_id;
     const location_id = e.parameter.location_id;
     if (company_id && location_id) {
@@ -56,7 +64,25 @@ function doGet(e) {
     }
     return respond(400, { error: 'Missing company_id or location_id' });
   } catch (err) {
+    logError('doGet', err.message, e.parameter);
     return respond(500, { error: err.message });
+  }
+}
+
+// ── Error Log — durable record of failed/unauthorized requests ────────────
+function logError(context, message, payload) {
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let errSheet = ss.getSheetByName('Error Log');
+    if (!errSheet) {
+      errSheet = ss.insertSheet('Error Log');
+      errSheet.appendRow(['Timestamp', 'Context', 'Error Message', 'Payload']);
+    }
+    let payloadStr = '';
+    try { payloadStr = JSON.stringify(payload || {}).slice(0, 500); } catch (e2) { payloadStr = String(payload); }
+    errSheet.appendRow([new Date().toISOString(), context, message, payloadStr]);
+  } catch (logErr) {
+    // Logging must never throw and block the real response.
   }
 }
 
@@ -168,6 +194,29 @@ function getOrdersByWeek(company_id, location_id, sku) {
   return {};
 }
 
+// ── Exponentially weighted average — recent weeks count more than old ones ──
+// Discrete form of the exponential-decay equation (dy/dt = -k(y - x(t))).
+// halfLifeWeeks controls how fast old weeks fade: lower = more reactive to
+// a recent ramp-up/down, higher = closer to a flat average like avg4/avg12.
+function ewma(usages, halfLifeWeeks) {
+  if (!usages.length) return null;
+  const alpha = 1 - Math.exp(-Math.LN2 / halfLifeWeeks);
+  let acc = usages[0];
+  for (let i = 1; i < usages.length; i++) {
+    acc = alpha * usages[i] + (1 - alpha) * acc;
+  }
+  return acc;
+}
+
+// ── Trend slope — simple discrete derivative over the last 3 weeks ─────────
+// Positive = usage ramping up, negative = sliding down. Early-warning signal
+// that shows up before weeksSince crosses the STALE/EXPIRE thresholds.
+function trendSlope(usages) {
+  const last3 = usages.slice(-3);
+  if (last3.length < 3) return null;
+  return (last3[2] - last3[0]) / 2;
+}
+
 // ── Rebuild usage summary for one location+sku ───────────────────────────
 function rebuildSummary(ss, company_id, company_name, location_id, location_name, sku) {
   const usageLog     = ss.getSheetByName('Usage Log');
@@ -192,6 +241,8 @@ function rebuildSummary(ss, company_id, company_name, location_id, location_name
   const last12 = usages.slice(-12);
   const avg4   = last4.length  ? last4.reduce((a,b)=>a+b,0)  / last4.length  : null;
   const avg12  = last12.length ? last12.reduce((a,b)=>a+b,0) / last12.length : null;
+  const avgEwma = ewma(usages, EWMA_HALF_LIFE_WEEKS);
+  const trend   = trendSlope(usages);
 
   // Last on-hand entry
   const ohData = ohLog.getDataRange().getValues();
@@ -227,7 +278,7 @@ function rebuildSummary(ss, company_id, company_name, location_id, location_name
     if (String(r[0]) === String(company_id) &&
         String(r[2]) === String(location_id) &&
         String(r[4]) === String(sku)) {
-      summarySheet.getRange(i + 1, 1, 1, 11).setValues([[
+      summarySheet.getRange(i + 1, 1, 1, 13).setValues([[
         company_id, company_name, location_id, location_name, sku,
         avg4 !== null ? Math.round(avg4 * 100) / 100 : '',
         avg12 !== null ? Math.round(avg12 * 100) / 100 : '',
@@ -235,6 +286,8 @@ function rebuildSummary(ss, company_id, company_name, location_id, location_name
         lastOH !== null ? lastOH : '',
         weeksSince !== null ? weeksSince : '',
         suggested !== null ? suggested : '',
+        avgEwma !== null ? Math.round(avgEwma * 100) / 100 : '',
+        trend !== null ? Math.round(trend * 100) / 100 : '',
       ]]);
       found = true;
       break;
@@ -249,6 +302,8 @@ function rebuildSummary(ss, company_id, company_name, location_id, location_name
       lastOH !== null ? lastOH : '',
       weeksSince !== null ? weeksSince : '',
       suggested !== null ? suggested : '',
+      avgEwma !== null ? Math.round(avgEwma * 100) / 100 : '',
+      trend !== null ? Math.round(trend * 100) / 100 : '',
     ]);
   }
 }
@@ -272,6 +327,8 @@ function getUsageSummaryByIds(company_id, location_id) {
         last_on_hand_qty:  r[8],
         weeks_since:       r[9],
         suggested_order:   r[10],
+        avg_ewma:          r[11],
+        trend_slope:       r[12],
       });
     }
   }

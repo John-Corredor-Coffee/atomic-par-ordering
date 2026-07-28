@@ -1,0 +1,27 @@
+name = "par-ordering"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+
+# Single Worker serves the static frontend (./public), the JSON API (/api/*), and
+# runs the nightly refresh cron. Requests that match a static asset are served from
+# ./public; everything else (i.e. /api/*) falls through to the fetch handler.
+[assets]
+directory = "./public"
+
+# Nightly refresh at 12:01 AM US Eastern. Cloudflare crons run on fixed UTC with no
+# DST awareness, so we schedule BOTH offsets and gate in scheduled() on the real
+# Eastern hour -- only the one just after local midnight runs, the other no-ops.
+#   04:01 UTC = 00:01 EDT (summer) / 23:01 EST (winter, skipped)
+#   05:01 UTC = 01:01 EDT (summer, skipped) / 00:01 EST (winter)
+[triggers]
+crons = ["1 4 * * *", "1 5 * * *"]
+
+# Internal all-staff tool -- the *.acr-ops.com Cloudflare Access wall gates this
+# hostname to staff Google SSO automatically (see ship-tool: no per-host app needed).
+[[routes]]
+pattern = "par-ordering.acr-ops.com"
+custom_domain = true
+
+[[kv_namespaces]]
+binding = "PAR_DATA"
+id = "80f338b025fb46b99c7f76ce67abf343"

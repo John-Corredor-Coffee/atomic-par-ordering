@@ -1937,7 +1937,7 @@ function fmtGenerated(iso, withTime) {
 
 async function loadData() {
   try {
-    const resp = await fetch('/api/data.json', { cache: 'no-store' });
+    const resp = await fetch('data.json', { cache: 'no-store' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
     COMPANIES = normalizeCompanies(json.companies || []);

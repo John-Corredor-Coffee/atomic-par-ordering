@@ -2,6 +2,11 @@ name = "par-ordering"
 main = "src/index.ts"
 compatibility_date = "2024-10-01"
 
+# No *.workers.dev URL -- the Worker is reachable ONLY at par-ordering.acr-ops.com,
+# which sits behind the *.acr-ops.com staff Access wall. Without this, the API (incl.
+# the refresh trigger) would be publicly hittable on the unauthenticated workers.dev host.
+workers_dev = false
+
 # Single Worker serves the static frontend (./public), the JSON API (/api/*), and
 # runs the nightly refresh cron. Requests that match a static asset are served from
 # ./public; everything else (i.e. /api/*) falls through to the fetch handler.

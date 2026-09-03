@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <script>if(localStorage.getItem('acr_auth')!=='ok'&&!['localhost','127.0.0.1'].includes(location.hostname)){location.replace('https://john-corredor-coffee.github.io/atomic-dashboard/?return='+encodeURIComponent(location.href));}</script>
+  <!-- No client-side password gate on this host. par-ordering.acr-ops.com sits behind the
+       *.acr-ops.com Cloudflare Access staff SSO wall, so the gate added nothing here. Worse,
+       the old localStorage 'acr_auth' flag is origin-scoped to john-corredor-coffee.github.io:
+       on this origin it could never match, so every visit bounced to the dashboard, which saw a
+       valid flag on ITS origin and bounced straight back, an infinite redirect loop.
+       The GitHub Pages copy was retired 2026-09-03 and is now just a redirect stub to this host. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PAR Ordering — Atomic Coffee Roasters</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">

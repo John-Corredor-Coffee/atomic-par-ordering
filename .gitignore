@@ -1,3 +1,9 @@
 scripts/.env
 __pycache__/
 *.pyc
+
+# Retired 2026-09-03: the PAR data now lives in Cloudflare KV and is served by the Worker
+# at par-ordering.acr-ops.com. This repo is a redirect stub only. data.json is ignored so a
+# stray refresh run cannot republish 344 wholesale accounts to a PUBLIC GitHub Pages URL,
+# which is exactly what it was doing until today.
+data.json

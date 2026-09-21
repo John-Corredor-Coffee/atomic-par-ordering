@@ -7,3 +7,10 @@ __pycache__/
 # stray refresh run cannot republish 344 wholesale accounts to a PUBLIC GitHub Pages URL,
 # which is exactly what it was doing until today.
 data.json
+
+# Wrangler's local dev state caches real KV payloads to disk. Two full PAR datasets
+# (346 and 343 named wholesale accounts with order history) were committed here and
+# served publicly from raw.githubusercontent.com until 2026-09-21 — the 2026-09-03
+# retirement only removed the root data.json and missed these entirely.
+.wrangler/
+node_modules/

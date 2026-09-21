@@ -130,7 +130,13 @@ const ORDERS_QUERY = `
   }
 `;
 
-const ACCEPTED_FINANCIAL_STATUSES = new Set(['PAID', 'PARTIALLY_REFUNDED', 'PARTIALLY_PAID']);
+// PENDING and AUTHORIZED are included deliberately: this store's wholesale/B2B
+// orders are predominantly net-terms (invoiced, not paid at checkout), so they sit
+// at PENDING for a long time. Dropping them here undercounts the majority of real
+// order volume and wrongly demotes active net-terms accounts to needs-review.
+// Only REFUNDED, VOIDED, and EXPIRED are excluded (see fetchAllOrders below for
+// the parallel test/cancelled exclusion, matching scripts/fetch_direct.py).
+const ACCEPTED_FINANCIAL_STATUSES = new Set(['PENDING', 'AUTHORIZED', 'PARTIALLY_PAID', 'PAID', 'PARTIALLY_REFUNDED']);
 
 export interface OrdersFetchResult {
   orders: RawOrder[];
